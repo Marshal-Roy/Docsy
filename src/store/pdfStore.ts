@@ -39,6 +39,7 @@ interface PdfState {
   isProcessing: boolean;
   activeTool: EditTool;
   activeColor: string;
+  selectedAnnotationId: string | null;
 
   // Actions
   setPdf: (bytes: Uint8Array, name: string) => Promise<void>;
@@ -52,6 +53,7 @@ interface PdfState {
   addAnnotation: (pageIndex: number, annotation: Omit<Annotation, 'id'>) => void;
   updateAnnotation: (pageIndex: number, annotationId: string, updates: Partial<Annotation>) => void;
   deleteAnnotation: (pageIndex: number, annotationId: string) => void;
+  setSelectedAnnotationId: (id: string | null) => void;
   resetPdf: () => void;
   rotatePage: (index: number, angle: number) => void;
   deletePage: (index: number) => void;
@@ -70,6 +72,7 @@ export const usePdfStore = create<PdfState>((set, get) => ({
   isProcessing: false,
   activeTool: 'select',
   activeColor: '#fbbf24', // Default highlight yellow
+  selectedAnnotationId: null,
 
   setPdf: async (bytes: Uint8Array, name: string) => {
     set({ isProcessing: true });
@@ -166,6 +169,10 @@ export const usePdfStore = create<PdfState>((set, get) => ({
         state: { pages: newPages, currentPageIndex, fileName }
       });
     }
+  },
+
+  setSelectedAnnotationId: (id: string | null) => {
+    set({ selectedAnnotationId: id });
   },
 
   resetPdf: () => {

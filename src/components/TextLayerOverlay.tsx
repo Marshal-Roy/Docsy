@@ -253,6 +253,33 @@ const FontToolbar = ({ activeEdit, updateActiveSpanStyle, fontFamilies, colors }
 const TextLayerOverlay: React.FC<Props> = ({ pdfProxy, pageIndex, viewport, canvasRef }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const [activeEdit, setActiveEdit] = useState<ActiveEdit | null>(null);
+  const [scaleFactor, setScaleFactor] = useState(1);
+
+  useEffect(() => {
+    const canvas = canvasRef?.current;
+    if (!canvas || !viewport) return;
+
+    const updateScale = () => {
+      const displayWidth = canvas.clientWidth;
+      const internalWidth = canvas.width || viewport.width;
+      if (internalWidth > 0 && displayWidth > 0) {
+        setScaleFactor(displayWidth / internalWidth);
+      }
+    };
+
+    updateScale();
+
+    const observer = new ResizeObserver(() => {
+      updateScale();
+    });
+    observer.observe(canvas);
+
+    window.addEventListener('resize', updateScale);
+    return () => {
+      observer.disconnect();
+      window.removeEventListener('resize', updateScale);
+    };
+  }, [canvasRef, viewport]);
 
   useEffect(() => {
     if (!containerRef.current || !pdfProxy || !viewport) return;
@@ -377,15 +404,21 @@ const TextLayerOverlay: React.FC<Props> = ({ pdfProxy, pageIndex, viewport, canv
           span.dataset.original = originalStr;
           span.dataset.textColor = currentColor;
 
+          const displayLeft = sx * scaleFactor;
+          const displayTop = (sy - currentSize * 0.8) * scaleFactor;
+          const displayWidth = screenW * scaleFactor;
+          const displayHeight = (currentSize * 1.2) * scaleFactor;
+          const displayFontSize = currentSize * scaleFactor;
+
           Object.assign(span.style, {
             position:    'absolute',
-            left:        `${sx}px`,
-            top:         `${sy - currentSize * 0.8}px`,
+            left:        `${displayLeft}px`,
+            top:         `${displayTop}px`,
             width:       'auto', 
-            minWidth:    `${screenW}px`,
-            height:      `${currentSize * 1.2}px`, 
-            fontSize:    `${currentSize}px`,
-            lineHeight:  `${currentSize}px`,
+            minWidth:    `${displayWidth}px`,
+            height:      `${displayHeight}px`, 
+            fontSize:    `${displayFontSize}px`,
+            lineHeight:  `${displayFontSize}px`,
             fontFamily:  currentFont,
             fontWeight:  currentWeight,
             fontStyle:   currentItalic,
@@ -403,7 +436,7 @@ const TextLayerOverlay: React.FC<Props> = ({ pdfProxy, pageIndex, viewport, canv
             WebkitFontSmoothing: 'antialiased',
             MozOsxFontSmoothing: 'grayscale',
             transform:       `rotate(${viewport.rotation}deg)`,
-            transformOrigin: `0 ${currentSize * 0.8}px`,
+            transformOrigin: `0 ${displayFontSize * 0.8}px`,
           });
 
           // ── focus: show editable state ────────────────────────────────
@@ -449,8 +482,8 @@ const TextLayerOverlay: React.FC<Props> = ({ pdfProxy, pageIndex, viewport, canv
               currentFontWeight: currentWeight,
               currentFontStyle: currentItalic,
               currentColor: activeColor,
-              top: sy - currentSize * 0.8 - 45,
-              left: sx
+              top: (sy - currentSize * 0.8) * scaleFactor - 45,
+              left: sx * scaleFactor
             });
 
           });
@@ -484,7 +517,7 @@ const TextLayerOverlay: React.FC<Props> = ({ pdfProxy, pageIndex, viewport, canv
               // Read final styling from span style properties
               const finalFontFamily = span.style.fontFamily || ff;
               const finalFontSizeStr = span.style.fontSize || '';
-              const finalFontSize = parseFloat(finalFontSizeStr) / viewport.scale || pdfFontSize;
+              const finalFontSize = parseFloat(finalFontSizeStr) / (viewport.scale * scaleFactor) || pdfFontSize;
               const finalFontWeight = span.style.fontWeight || 'normal';
               const finalFontStyle = span.style.fontStyle || 'normal';
               const finalColor = span.dataset.textColor || currentColor;
@@ -507,7 +540,7 @@ const TextLayerOverlay: React.FC<Props> = ({ pdfProxy, pageIndex, viewport, canv
                   ctx.rotate((viewport.rotation * Math.PI) / 180);
                   
                   const activeScreenFontSize = finalFontSize * viewport.scale;
-                  const newScreenW = span.clientWidth;
+                  const newScreenW = span.clientWidth / scaleFactor;
                   const newNatW = (newScreenW / viewport.scale / naturalVp.width) * 100;
                   const finalNatW = Math.max(newNatW, freshAnn?.width || natW);
 
@@ -527,7 +560,7 @@ const TextLayerOverlay: React.FC<Props> = ({ pdfProxy, pageIndex, viewport, canv
                 }
               }
 
-              const newScreenW = span.clientWidth;
+              const newScreenW = span.clientWidth / scaleFactor;
               const newNatW = (newScreenW / viewport.scale / naturalVp.width) * 100;
               const finalNatW = Math.max(newNatW, freshAnn?.width || natW);
 
@@ -571,7 +604,7 @@ const TextLayerOverlay: React.FC<Props> = ({ pdfProxy, pageIndex, viewport, canv
     };
 
     buildLayer();
-  }, [pdfProxy, pageIndex, viewport]);
+  }, [pdfProxy, pageIndex, viewport, scaleFactor]);
 
   // Handle toolbar interactions
   const updateActiveSpanStyle = (updater: (edit: ActiveEdit) => Partial<ActiveEdit>) => {
@@ -583,10 +616,10 @@ const TextLayerOverlay: React.FC<Props> = ({ pdfProxy, pageIndex, viewport, canv
     
     span.style.fontFamily = newEdit.currentFontFamily;
     
-    const sizeInPx = newEdit.currentFontSize * viewport.scale;
+    const sizeInPx = newEdit.currentFontSize * viewport.scale * scaleFactor;
     span.style.fontSize = `${sizeInPx}px`;
     span.style.lineHeight = `${sizeInPx}px`;
-    span.style.top = `${newEdit.sy - sizeInPx * 0.8}px`;
+    span.style.top = `${(newEdit.sy - newEdit.currentFontSize * viewport.scale * 0.8) * scaleFactor}px`;
 
     span.style.fontWeight = newEdit.currentFontWeight;
     span.style.fontStyle = newEdit.currentFontStyle;
@@ -594,7 +627,7 @@ const TextLayerOverlay: React.FC<Props> = ({ pdfProxy, pageIndex, viewport, canv
     span.style.color = newEdit.currentColor;
     span.dataset.textColor = newEdit.currentColor;
 
-    newEdit.top = newEdit.sy - sizeInPx * 0.8 - 45;
+    newEdit.top = (newEdit.sy - newEdit.currentFontSize * viewport.scale * 0.8) * scaleFactor - 45;
 
     setActiveEdit(newEdit);
     span.focus();
