@@ -21,7 +21,7 @@ const PdfViewer: React.FC = () => {
   const { 
     pdfBytes, pages, currentPageIndex, setCurrentPage, rotatePage, deletePage, exportPdf, 
     isProcessing, pdfProxy, setPdfProxy, activeTool, setTool, activeColor, setColor, addAnnotation,
-    addBlankPage, addImagePage, addPages
+    addBlankPage, addImagePage, addPages, selectedAnnotationId, setSelectedAnnotationId, deleteAnnotation
   } = usePdfStore();
 
   const toolButtons: { id: any; icon: any; label: string }[] = [
@@ -156,10 +156,19 @@ const PdfViewer: React.FC = () => {
     if (!containerRef.current) return { x: 0, y: 0 };
     const rect = containerRef.current.getBoundingClientRect();
     
-    const clientX = e.clientX - rect.left;
-    const clientY = e.clientY - rect.top;
+    let clientX = e.clientX - rect.left;
+    let clientY = e.clientY - rect.top;
     
     if (viewport) {
+      const displayWidth = rect.width;
+      const internalWidth = viewport.width;
+      const scaleFactor = displayWidth / internalWidth;
+      
+      if (scaleFactor > 0) {
+        clientX = clientX / scaleFactor;
+        clientY = clientY / scaleFactor;
+      }
+
       const [pdfX, pdfY] = viewport.convertToPdfPoint(clientX, clientY);
       const naturalW = viewport.viewBox[2];
       const naturalH = viewport.viewBox[3];
@@ -492,9 +501,16 @@ const PdfViewer: React.FC = () => {
             </button>
             <button 
               className="glass-interactive" 
-              title="Delete Page"
-              onClick={() => deletePage(currentPageIndex)}
-              disabled={pages.length <= 1}
+              title={selectedAnnotationId ? "Delete Selected Item" : "Delete Page"}
+              onClick={() => {
+                if (selectedAnnotationId) {
+                  deleteAnnotation(currentPageIndex, selectedAnnotationId);
+                  setSelectedAnnotationId(null);
+                } else {
+                  deletePage(currentPageIndex);
+                }
+              }}
+              disabled={!selectedAnnotationId && pages.length <= 1}
               style={{ width: '36px', height: '36px', display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: '8px', color: '#f87171' }}
             >
               <Trash2 size={18} />

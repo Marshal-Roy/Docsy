@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Annotation, usePdfStore } from '@/store/pdfStore';
 
 interface Props {
@@ -9,10 +9,12 @@ interface Props {
   pageIndex?: number;
 }
 
-const InteractiveImage: React.FC<{ ann: Annotation, width: number, height: number, viewport?: any, pageIndex?: number }> = ({ ann, width, height, viewport, pageIndex }) => {
-  const { updateAnnotation } = usePdfStore();
+const InteractiveImage: React.FC<{ ann: Annotation, width: number, height: number, viewport?: any, pageIndex?: number, scaleFactor: number }> = ({ ann, width, height, viewport, pageIndex, scaleFactor }) => {
+  const { updateAnnotation, selectedAnnotationId, setSelectedAnnotationId, deleteAnnotation } = usePdfStore();
   const [isDragging, setIsDragging] = useState(false);
   const [isResizing, setIsResizing] = useState<string | null>(null);
+  const lastX = useRef(0);
+  const lastY = useRef(0);
   
   // localPos stores unrotated percentages
   const [localPos, setLocalPos] = useState({ 
@@ -21,7 +23,8 @@ const InteractiveImage: React.FC<{ ann: Annotation, width: number, height: numbe
     w: ann.width || 20, 
     h: ann.height || 20 
   });
-  const [isSelected, setIsSelected] = useState(false);
+  
+  const isSelected = selectedAnnotationId === ann.id;
 
   useEffect(() => {
     if (!isDragging && !isResizing) {
@@ -35,10 +38,10 @@ const InteractiveImage: React.FC<{ ann: Annotation, width: number, height: numbe
   }, [ann, isDragging, isResizing]);
 
   useEffect(() => {
-    const handleGlobalClick = () => setIsSelected(false);
+    const handleGlobalClick = () => setSelectedAnnotationId(null);
     window.addEventListener('click', handleGlobalClick);
     return () => window.removeEventListener('click', handleGlobalClick);
-  }, []);
+  }, [setSelectedAnnotationId]);
 
   useEffect(() => {
     if (!isSelected || pageIndex === undefined) return;
@@ -47,46 +50,83 @@ const InteractiveImage: React.FC<{ ann: Annotation, width: number, height: numbe
         const tag = document.activeElement?.tagName.toLowerCase();
         if (tag === 'textarea' || tag === 'input') return;
         usePdfStore.getState().deleteAnnotation(pageIndex, ann.id);
+        setSelectedAnnotationId(null);
       }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isSelected, ann.id, pageIndex]);
+  }, [isSelected, ann.id, pageIndex, setSelectedAnnotationId]);
+
+  const handleDragStart = (clientX: number, clientY: number) => {
+    setIsDragging(true);
+    lastX.current = clientX;
+    lastY.current = clientY;
+  };
+
+  const handleResizeStart = (clientX: number, clientY: number, handle: string) => {
+    setIsResizing(handle);
+    lastX.current = clientX;
+    lastY.current = clientY;
+  };
 
   const handleMouseDown = (e: React.MouseEvent) => {
     e.stopPropagation();
-    setIsSelected(true);
-    setIsDragging(true);
+    setSelectedAnnotationId(ann.id);
+    handleDragStart(e.clientX, e.clientY);
   };
 
-  const handleResizeStart = (e: React.MouseEvent, handle: string) => {
+  const handleTouchStart = (e: React.TouchEvent) => {
     e.stopPropagation();
-    setIsSelected(true);
-    setIsResizing(handle);
+    setSelectedAnnotationId(ann.id);
+    const touch = e.touches[0];
+    if (touch) {
+      handleDragStart(touch.clientX, touch.clientY);
+    }
+  };
+
+  const handleMouseDownResize = (e: React.MouseEvent, handle: string) => {
+    e.stopPropagation();
+    setSelectedAnnotationId(ann.id);
+    handleResizeStart(e.clientX, e.clientY, handle);
+  };
+
+  const handleTouchStartResize = (e: React.TouchEvent, handle: string) => {
+    e.stopPropagation();
+    setSelectedAnnotationId(ann.id);
+    const touch = e.touches[0];
+    if (touch) {
+      handleResizeStart(touch.clientX, touch.clientY, handle);
+    }
   };
 
   useEffect(() => {
     if (!isDragging && !isResizing) return;
 
-    const handleMouseMove = (e: MouseEvent) => {
-      e.stopPropagation();
-      e.preventDefault();
+    const handleMove = (clientX: number, clientY: number) => {
+      const deltaX = clientX - lastX.current;
+      const deltaY = clientY - lastY.current;
 
-      let unrotDx = e.movementX;
-      let unrotDy = e.movementY;
+      lastX.current = clientX;
+      lastY.current = clientY;
+
+      let unrotDx = deltaX;
+      let unrotDy = deltaY;
       
       let scaleX = width;
       let scaleY = height;
 
       if (viewport) {
         const rad = (-viewport.rotation * Math.PI) / 180;
-        unrotDx = e.movementX * Math.cos(rad) - e.movementY * Math.sin(rad);
-        unrotDy = e.movementX * Math.sin(rad) + e.movementY * Math.cos(rad);
+        unrotDx = deltaX * Math.cos(rad) - deltaY * Math.sin(rad);
+        unrotDy = deltaX * Math.sin(rad) + deltaY * Math.cos(rad);
         
         const naturalW = viewport.viewBox[2];
         const naturalH = viewport.viewBox[3];
-        scaleX = naturalW * viewport.scale;
-        scaleY = naturalH * viewport.scale;
+        scaleX = naturalW * viewport.scale * scaleFactor;
+        scaleY = naturalH * viewport.scale * scaleFactor;
+      } else {
+        scaleX = width * scaleFactor;
+        scaleY = height * scaleFactor;
       }
 
       const dx = (unrotDx / scaleX) * 100;
@@ -113,7 +153,23 @@ const InteractiveImage: React.FC<{ ann: Annotation, width: number, height: numbe
       }
     };
 
-    const handleMouseUp = () => {
+    const handleMouseMove = (e: MouseEvent) => {
+      e.stopPropagation();
+      handleMove(e.clientX, e.clientY);
+    };
+
+    const handleTouchMove = (e: TouchEvent) => {
+      e.stopPropagation();
+      if (e.cancelable) {
+        e.preventDefault();
+      }
+      const touch = e.touches[0];
+      if (touch) {
+        handleMove(touch.clientX, touch.clientY);
+      }
+    };
+
+    const handleUp = () => {
       setIsDragging(false);
       setIsResizing(null);
       if (pageIndex !== undefined) {
@@ -128,13 +184,18 @@ const InteractiveImage: React.FC<{ ann: Annotation, width: number, height: numbe
       }
     };
 
-    window.addEventListener('mousemove', handleMouseMove);
-    window.addEventListener('mouseup', handleMouseUp);
+    window.addEventListener('mousemove', handleMouseMove, { passive: false });
+    window.addEventListener('mouseup', handleUp);
+    window.addEventListener('touchmove', handleTouchMove, { passive: false });
+    window.addEventListener('touchend', handleUp);
+
     return () => {
       window.removeEventListener('mousemove', handleMouseMove);
-      window.removeEventListener('mouseup', handleMouseUp);
+      window.removeEventListener('mouseup', handleUp);
+      window.removeEventListener('touchmove', handleTouchMove);
+      window.removeEventListener('touchend', handleUp);
     };
-  }, [isDragging, isResizing, width, height, viewport, pageIndex, ann.id, updateAnnotation]);
+  }, [isDragging, isResizing, width, height, viewport, pageIndex, ann.id, updateAnnotation, scaleFactor]);
 
   let sx = (localPos.x * width) / 100;
   let sy = (localPos.y * height) / 100;
@@ -177,14 +238,16 @@ const InteractiveImage: React.FC<{ ann: Annotation, width: number, height: numbe
         preserveAspectRatio="none"
         style={{ cursor: 'move', pointerEvents: 'auto' }}
         onMouseDown={handleMouseDown}
-        onClick={(e) => { e.stopPropagation(); setIsSelected(true); }}
+        onTouchStart={handleTouchStart}
+        onClick={(e) => { e.stopPropagation(); setSelectedAnnotationId(ann.id); }}
       />
       {isSelected && (
         <>
           <g
              transform={`translate(${scaledW - 12}, -12)`}
              style={{ cursor: 'pointer', pointerEvents: 'auto' }}
-             onMouseDown={(e) => { e.stopPropagation(); if (pageIndex !== undefined) usePdfStore.getState().deleteAnnotation(pageIndex, ann.id); }}
+             onMouseDown={(e) => { e.stopPropagation(); if (pageIndex !== undefined) { deleteAnnotation(pageIndex, ann.id); setSelectedAnnotationId(null); } }}
+             onTouchStart={(e) => { e.stopPropagation(); if (pageIndex !== undefined) { deleteAnnotation(pageIndex, ann.id); setSelectedAnnotationId(null); } }}
           >
              <circle cx={12} cy={12} r={10} fill="#ef4444" stroke="white" strokeWidth={2} />
              <path d="M8 8 L16 16 M16 8 L8 16" stroke="white" strokeWidth={2} strokeLinecap="round" />
@@ -201,7 +264,8 @@ const InteractiveImage: React.FC<{ ann: Annotation, width: number, height: numbe
               width={8} height={8}
               fill="white" stroke="#3b82f6" strokeWidth={1.5}
               style={{ cursor: h.cursor, pointerEvents: 'auto' }}
-              onMouseDown={(e) => handleResizeStart(e, h.id)}
+              onMouseDown={(e) => handleMouseDownResize(e, h.id)}
+              onTouchStart={(e) => handleTouchStartResize(e, h.id)}
             />
           ))}
         </>
@@ -210,10 +274,12 @@ const InteractiveImage: React.FC<{ ann: Annotation, width: number, height: numbe
   );
 };
 
-const InteractiveComment: React.FC<{ ann: Annotation, width: number, height: number, viewport?: any, pageIndex?: number }> = ({ ann, width, height, viewport, pageIndex }) => {
-  const { updateAnnotation } = usePdfStore();
+const InteractiveComment: React.FC<{ ann: Annotation, width: number, height: number, viewport?: any, pageIndex?: number, scaleFactor: number }> = ({ ann, width, height, viewport, pageIndex, scaleFactor }) => {
+  const { updateAnnotation, selectedAnnotationId, setSelectedAnnotationId, deleteAnnotation } = usePdfStore();
   const [isDragging, setIsDragging] = useState(false);
   const [isResizing, setIsResizing] = useState<string | null>(null);
+  const lastX = useRef(0);
+  const lastY = useRef(0);
   
   const [localPos, setLocalPos] = useState({ 
     x: ann.points[0]?.x || 0, 
@@ -221,7 +287,8 @@ const InteractiveComment: React.FC<{ ann: Annotation, width: number, height: num
     w: ann.width || 20, 
     h: ann.height || 10 
   });
-  const [isSelected, setIsSelected] = useState(false);
+  
+  const isSelected = selectedAnnotationId === ann.id;
   const [isEditing, setIsEditing] = useState(false);
   const textRef = React.useRef<HTMLTextAreaElement>(null);
 
@@ -243,10 +310,13 @@ const InteractiveComment: React.FC<{ ann: Annotation, width: number, height: num
   }, [ann, isDragging, isResizing]);
 
   useEffect(() => {
-    const handleGlobalClick = () => setIsSelected(false);
+    const handleGlobalClick = () => {
+      setSelectedAnnotationId(null);
+      setIsEditing(false);
+    };
     window.addEventListener('click', handleGlobalClick);
     return () => window.removeEventListener('click', handleGlobalClick);
-  }, []);
+  }, [setSelectedAnnotationId]);
 
   useEffect(() => {
     if (!isSelected || pageIndex === undefined) return;
@@ -255,46 +325,83 @@ const InteractiveComment: React.FC<{ ann: Annotation, width: number, height: num
         const tag = document.activeElement?.tagName.toLowerCase();
         if (tag === 'textarea' || tag === 'input') return;
         usePdfStore.getState().deleteAnnotation(pageIndex, ann.id);
+        setSelectedAnnotationId(null);
       }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isSelected, ann.id, pageIndex]);
+  }, [isSelected, ann.id, pageIndex, setSelectedAnnotationId]);
+
+  const handleDragStart = (clientX: number, clientY: number) => {
+    setIsDragging(true);
+    lastX.current = clientX;
+    lastY.current = clientY;
+  };
+
+  const handleResizeStart = (clientX: number, clientY: number, handle: string) => {
+    setIsResizing(handle);
+    lastX.current = clientX;
+    lastY.current = clientY;
+  };
 
   const handleMouseDown = (e: React.MouseEvent) => {
     e.stopPropagation();
-    setIsSelected(true);
-    setIsDragging(true);
+    setSelectedAnnotationId(ann.id);
+    handleDragStart(e.clientX, e.clientY);
   };
 
-  const handleResizeStart = (e: React.MouseEvent, handle: string) => {
+  const handleTouchStart = (e: React.TouchEvent) => {
     e.stopPropagation();
-    setIsSelected(true);
-    setIsResizing(handle);
+    setSelectedAnnotationId(ann.id);
+    const touch = e.touches[0];
+    if (touch) {
+      handleDragStart(touch.clientX, touch.clientY);
+    }
+  };
+
+  const handleMouseDownResize = (e: React.MouseEvent, handle: string) => {
+    e.stopPropagation();
+    setSelectedAnnotationId(ann.id);
+    handleResizeStart(e.clientX, e.clientY, handle);
+  };
+
+  const handleTouchStartResize = (e: React.TouchEvent, handle: string) => {
+    e.stopPropagation();
+    setSelectedAnnotationId(ann.id);
+    const touch = e.touches[0];
+    if (touch) {
+      handleResizeStart(touch.clientX, touch.clientY, handle);
+    }
   };
 
   useEffect(() => {
     if (!isDragging && !isResizing) return;
 
-    const handleMouseMove = (e: MouseEvent) => {
-      e.stopPropagation();
-      e.preventDefault();
+    const handleMove = (clientX: number, clientY: number) => {
+      const deltaX = clientX - lastX.current;
+      const deltaY = clientY - lastY.current;
 
-      let unrotDx = e.movementX;
-      let unrotDy = e.movementY;
+      lastX.current = clientX;
+      lastY.current = clientY;
+
+      let unrotDx = deltaX;
+      let unrotDy = deltaY;
       
       let scaleX = width;
       let scaleY = height;
 
       if (viewport) {
         const rad = (-viewport.rotation * Math.PI) / 180;
-        unrotDx = e.movementX * Math.cos(rad) - e.movementY * Math.sin(rad);
-        unrotDy = e.movementX * Math.sin(rad) + e.movementY * Math.cos(rad);
+        unrotDx = deltaX * Math.cos(rad) - deltaY * Math.sin(rad);
+        unrotDy = deltaX * Math.sin(rad) + deltaY * Math.cos(rad);
         
         const naturalW = viewport.viewBox[2];
         const naturalH = viewport.viewBox[3];
-        scaleX = naturalW * viewport.scale;
-        scaleY = naturalH * viewport.scale;
+        scaleX = naturalW * viewport.scale * scaleFactor;
+        scaleY = naturalH * viewport.scale * scaleFactor;
+      } else {
+        scaleX = width * scaleFactor;
+        scaleY = height * scaleFactor;
       }
 
       const dx = (unrotDx / scaleX) * 100;
@@ -321,7 +428,23 @@ const InteractiveComment: React.FC<{ ann: Annotation, width: number, height: num
       }
     };
 
-    const handleMouseUp = () => {
+    const handleMouseMove = (e: MouseEvent) => {
+      e.stopPropagation();
+      handleMove(e.clientX, e.clientY);
+    };
+
+    const handleTouchMove = (e: TouchEvent) => {
+      e.stopPropagation();
+      if (e.cancelable) {
+        e.preventDefault();
+      }
+      const touch = e.touches[0];
+      if (touch) {
+        handleMove(touch.clientX, touch.clientY);
+      }
+    };
+
+    const handleUp = () => {
       setIsDragging(false);
       setIsResizing(null);
       if (pageIndex !== undefined) {
@@ -336,13 +459,18 @@ const InteractiveComment: React.FC<{ ann: Annotation, width: number, height: num
       }
     };
 
-    window.addEventListener('mousemove', handleMouseMove);
-    window.addEventListener('mouseup', handleMouseUp);
+    window.addEventListener('mousemove', handleMouseMove, { passive: false });
+    window.addEventListener('mouseup', handleUp);
+    window.addEventListener('touchmove', handleTouchMove, { passive: false });
+    window.addEventListener('touchend', handleUp);
+
     return () => {
       window.removeEventListener('mousemove', handleMouseMove);
-      window.removeEventListener('mouseup', handleMouseUp);
+      window.removeEventListener('mouseup', handleUp);
+      window.removeEventListener('touchmove', handleTouchMove);
+      window.removeEventListener('touchend', handleUp);
     };
-  }, [isDragging, isResizing, width, height, viewport, pageIndex, ann.id, updateAnnotation]);
+  }, [isDragging, isResizing, width, height, viewport, pageIndex, ann.id, updateAnnotation, scaleFactor]);
 
   let sx = (localPos.x * width) / 100;
   let sy = (localPos.y * height) / 100;
@@ -386,8 +514,9 @@ const InteractiveComment: React.FC<{ ann: Annotation, width: number, height: num
         strokeWidth={1}
         style={{ cursor: 'move', pointerEvents: 'auto' }}
         onMouseDown={handleMouseDown}
-        onClick={(e) => { e.stopPropagation(); setIsSelected(true); }}
-        onDoubleClick={(e) => { e.stopPropagation(); setIsSelected(true); setIsEditing(true); }}
+        onTouchStart={handleTouchStart}
+        onClick={(e) => { e.stopPropagation(); setSelectedAnnotationId(ann.id); }}
+        onDoubleClick={(e) => { e.stopPropagation(); setSelectedAnnotationId(ann.id); setIsEditing(true); }}
       />
       <foreignObject x={0} y={0} width={scaledW} height={scaledH} style={{ pointerEvents: 'none' }}>
         <textarea
@@ -399,7 +528,7 @@ const InteractiveComment: React.FC<{ ann: Annotation, width: number, height: num
             }
           }}
           onBlur={() => setIsEditing(false)}
-          onClick={(e) => { e.stopPropagation(); setIsSelected(true); }}
+          onClick={(e) => { e.stopPropagation(); setSelectedAnnotationId(ann.id); }}
           onMouseDown={(e) => e.stopPropagation()}
           style={{
             width: '100%',
@@ -423,7 +552,8 @@ const InteractiveComment: React.FC<{ ann: Annotation, width: number, height: num
           <g
              transform={`translate(${scaledW - 12}, -12)`}
              style={{ cursor: 'pointer', pointerEvents: 'auto' }}
-             onMouseDown={(e) => { e.stopPropagation(); if (pageIndex !== undefined) usePdfStore.getState().deleteAnnotation(pageIndex, ann.id); }}
+             onMouseDown={(e) => { e.stopPropagation(); if (pageIndex !== undefined) { deleteAnnotation(pageIndex, ann.id); setSelectedAnnotationId(null); } }}
+             onTouchStart={(e) => { e.stopPropagation(); if (pageIndex !== undefined) { deleteAnnotation(pageIndex, ann.id); setSelectedAnnotationId(null); } }}
           >
              <circle cx={12} cy={12} r={10} fill="#ef4444" stroke="white" strokeWidth={2} />
              <path d="M8 8 L16 16 M16 8 L8 16" stroke="white" strokeWidth={2} strokeLinecap="round" />
@@ -435,7 +565,8 @@ const InteractiveComment: React.FC<{ ann: Annotation, width: number, height: num
               width={8} height={8}
               fill="white" stroke="#3b82f6" strokeWidth={1.5}
               style={{ cursor: h.cursor, pointerEvents: 'auto' }}
-              onMouseDown={(e) => handleResizeStart(e, h.id)}
+              onMouseDown={(e) => handleMouseDownResize(e, h.id)}
+              onTouchStart={(e) => handleTouchStartResize(e, h.id)}
             />
           ))}
         </>
@@ -445,6 +576,33 @@ const InteractiveComment: React.FC<{ ann: Annotation, width: number, height: num
 };
 
 const AnnotationOverlay: React.FC<Props> = ({ annotations, width, height, viewport, pageIndex }) => {
+  const svgRef = React.useRef<SVGSVGElement>(null);
+  const [scaleFactor, setScaleFactor] = React.useState(1);
+
+  React.useEffect(() => {
+    const svg = svgRef.current;
+    if (!svg || !width) return;
+
+    const updateScale = () => {
+      const displayWidth = svg.clientWidth;
+      if (displayWidth > 0) {
+        setScaleFactor(displayWidth / width);
+      }
+    };
+
+    updateScale();
+    const observer = new ResizeObserver(() => {
+      updateScale();
+    });
+    observer.observe(svg);
+
+    window.addEventListener('resize', updateScale);
+    return () => {
+      observer.disconnect();
+      window.removeEventListener('resize', updateScale);
+    };
+  }, [width]);
+
   const getScreenPoint = (p: { x: number; y: number }) => {
     if (!viewport) return { x: (p.x * width) / 100, y: (p.y * height) / 100 };
     const naturalW = viewport.viewBox[2];
@@ -464,6 +622,7 @@ const AnnotationOverlay: React.FC<Props> = ({ annotations, width, height, viewpo
 
   return (
     <svg
+      ref={svgRef}
       style={{
         position: 'absolute',
         top: 0,
@@ -514,6 +673,7 @@ const AnnotationOverlay: React.FC<Props> = ({ annotations, width, height, viewpo
               height={height}
               viewport={viewport}
               pageIndex={pageIndex}
+              scaleFactor={scaleFactor}
             />
           );
         }
@@ -529,6 +689,7 @@ const AnnotationOverlay: React.FC<Props> = ({ annotations, width, height, viewpo
               height={height} 
               viewport={viewport}
               pageIndex={pageIndex} 
+              scaleFactor={scaleFactor}
             />
           );
         }
