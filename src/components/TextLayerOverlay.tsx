@@ -87,7 +87,8 @@ const FontToolbar = ({ activeEdit, updateActiveSpanStyle, fontFamilies, colors }
 
     // Try to place above the span
     let top = spanRect.top - toolbarH - 6;
-    let left = spanRect.left;
+    // Center horizontally over the span
+    let left = spanRect.left + (spanRect.width / 2) - (toolbarW / 2);
 
     // If it goes above the viewport, place below the span instead
     if (top < margin) {
@@ -135,10 +136,13 @@ const FontToolbar = ({ activeEdit, updateActiveSpanStyle, fontFamilies, colors }
         backdropFilter: 'blur(12px)',
         border: '1px solid rgba(255, 255, 255, 0.1)',
         borderRadius: '12px',
-        padding: '6px 12px',
+        padding: '4px 8px',
         display: 'flex',
         alignItems: 'center',
-        gap: '12px',
+        justifyContent: 'center',
+        flexWrap: 'wrap',
+        maxWidth: 'calc(100vw - 16px)',
+        gap: '8px',
         zIndex: 10000,
         boxShadow: '0 10px 30px -10px rgba(0,0,0,0.5)',
         pointerEvents: 'auto',
@@ -153,10 +157,10 @@ const FontToolbar = ({ activeEdit, updateActiveSpanStyle, fontFamilies, colors }
             border: '1px solid rgba(255,255,255,0.1)',
             borderRadius: '6px',
             color: 'var(--text-primary)',
-            fontSize: '0.8rem',
-            padding: '4px 12px',
+            fontSize: '0.75rem',
+            padding: '2px 8px',
             cursor: 'pointer',
-            minWidth: '80px',
+            minWidth: '60px',
             textAlign: 'left',
             display: 'flex',
             justifyContent: 'space-between',
@@ -216,27 +220,27 @@ const FontToolbar = ({ activeEdit, updateActiveSpanStyle, fontFamilies, colors }
         )}
       </div>
 
-      <div style={{ width: '1px', height: '20px', background: 'rgba(255,255,255,0.1)' }} />
+      <div style={{ width: '1px', height: '16px', background: 'rgba(255,255,255,0.1)' }} />
 
       {/* Font Size controls */}
       <div style={{ display: 'flex', alignItems: 'center', gap: '2px', background: 'rgba(0,0,0,0.2)', borderRadius: '6px', padding: '2px' }}>
         <button
           onMouseDown={(e) => { e.preventDefault(); updateActiveSpanStyle((prev: any) => ({ currentFontSize: Math.max(prev.currentFontSize - 1, 4) })); }}
-          style={{ background: 'transparent', border: 'none', color: 'var(--text-primary)', width: '24px', height: '24px', cursor: 'pointer', borderRadius: '4px' }}
+          style={{ background: 'transparent', border: 'none', color: 'var(--text-primary)', width: '20px', height: '20px', cursor: 'pointer', borderRadius: '4px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
         >-</button>
-        <div style={{ width: '32px', textAlign: 'center', fontSize: '0.8rem', fontWeight: 500 }}>
+        <div style={{ width: '24px', textAlign: 'center', fontSize: '0.75rem', fontWeight: 500 }}>
           {activeEdit.currentFontSize}
         </div>
         <button
           onMouseDown={(e) => { e.preventDefault(); updateActiveSpanStyle((prev: any) => ({ currentFontSize: prev.currentFontSize + 1 })); }}
-          style={{ background: 'transparent', border: 'none', color: 'var(--text-primary)', width: '24px', height: '24px', cursor: 'pointer', borderRadius: '4px' }}
+          style={{ background: 'transparent', border: 'none', color: 'var(--text-primary)', width: '20px', height: '20px', cursor: 'pointer', borderRadius: '4px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
         >+</button>
       </div>
 
-      <div style={{ width: '1px', height: '20px', background: 'rgba(255,255,255,0.1)' }} />
+      <div style={{ width: '1px', height: '16px', background: 'rgba(255,255,255,0.1)' }} />
 
       {/* Style toggles */}
-      <div style={{ display: 'flex', gap: '4px' }}>
+      <div style={{ display: 'flex', gap: '2px' }}>
         <button
           onMouseDown={(e) => { e.preventDefault(); updateActiveSpanStyle((prev: any) => ({ currentFontWeight: prev.currentFontWeight === 'bold' ? 'normal' : 'bold' })); }}
           style={{
@@ -244,8 +248,8 @@ const FontToolbar = ({ activeEdit, updateActiveSpanStyle, fontFamilies, colors }
             border: 'none',
             borderRadius: '6px',
             color: 'white',
-            width: '28px',
-            height: '28px',
+            width: '24px',
+            height: '24px',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
@@ -253,7 +257,7 @@ const FontToolbar = ({ activeEdit, updateActiveSpanStyle, fontFamilies, colors }
             transition: 'background 0.2s',
           }}
         >
-          <Bold size={14} />
+          <Bold size={12} />
         </button>
 
         <button
@@ -263,8 +267,8 @@ const FontToolbar = ({ activeEdit, updateActiveSpanStyle, fontFamilies, colors }
             border: 'none',
             borderRadius: '6px',
             color: 'white',
-            width: '28px',
-            height: '28px',
+            width: '24px',
+            height: '24px',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
@@ -272,21 +276,21 @@ const FontToolbar = ({ activeEdit, updateActiveSpanStyle, fontFamilies, colors }
             transition: 'background 0.2s',
           }}
         >
-          <Italic size={14} />
+          <Italic size={12} />
         </button>
       </div>
 
-      <div style={{ width: '1px', height: '20px', background: 'rgba(255,255,255,0.1)' }} />
+      <div style={{ width: '1px', height: '16px', background: 'rgba(255,255,255,0.1)' }} />
 
       {/* Colors */}
-      <div style={{ display: 'flex', gap: '6px', padding: '0 4px' }}>
+      <div style={{ display: 'flex', gap: '4px', padding: '0 2px', flexWrap: 'wrap', justifyContent: 'center' }}>
         {colors.map((c: string) => (
           <button
             key={c}
             onMouseDown={(e) => { e.preventDefault(); updateActiveSpanStyle(() => ({ currentColor: c })); }}
             style={{
-              width: '18px',
-              height: '18px',
+              width: '16px',
+              height: '16px',
               borderRadius: '50%',
               background: c,
               border: activeEdit.currentColor === c ? '2px solid white' : '2px solid transparent',
