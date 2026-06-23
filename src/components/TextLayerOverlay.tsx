@@ -1,5 +1,6 @@
 "use client";
 import React, { useEffect, useRef, useState } from 'react';
+import ReactDOM from 'react-dom';
 import * as pdfjsLib from 'pdfjs-dist';
 import { usePdfStore } from '@/store/pdfStore';
 import { Bold, Italic, Type, Palette, Check } from 'lucide-react';
@@ -63,22 +64,73 @@ interface ActiveEdit {
   currentFontWeight: string;
   currentFontStyle: string;
   currentColor: string;
-  top: number;
-  left: number;
 }
 
 const FontToolbar = ({ activeEdit, updateActiveSpanStyle, fontFamilies, colors }: any) => {
   const [showDropdown, setShowDropdown] = useState(false);
+  const toolbarRef = useRef<HTMLDivElement>(null);
+  const dropdownRef = useRef<HTMLDivElement>(null);
+  const [pos, setPos] = useState<{ top: number; left: number }>({ top: 0, left: 0 });
   
   const currentFontName = fontFamilies.find((f: any) => f.val === activeEdit.currentFontFamily)?.name || 'Arial';
 
+  // Calculate fixed position from the span's actual screen rect, clamped to viewport
+  React.useLayoutEffect(() => {
+    const span = activeEdit.span as HTMLSpanElement;
+    if (!span || !toolbarRef.current) return;
+
+    const spanRect = span.getBoundingClientRect();
+    const toolbarRect = toolbarRef.current.getBoundingClientRect();
+    const margin = 8;
+    const toolbarH = toolbarRect.height || 45;
+    const toolbarW = toolbarRect.width || 400;
+
+    // Try to place above the span
+    let top = spanRect.top - toolbarH - 6;
+    let left = spanRect.left;
+
+    // If it goes above the viewport, place below the span instead
+    if (top < margin) {
+      top = spanRect.bottom + 6;
+    }
+    // If it still goes below viewport, just pin to top
+    if (top + toolbarH > window.innerHeight - margin) {
+      top = margin;
+    }
+
+    // Clamp horizontally
+    if (left + toolbarW > window.innerWidth - margin) {
+      left = window.innerWidth - toolbarW - margin;
+    }
+    if (left < margin) {
+      left = margin;
+    }
+
+    setPos({ top, left });
+  }, [activeEdit, activeEdit.currentFontSize, activeEdit.currentFontFamily]);
+
+  // Flip dropdown if it goes off-screen
+  React.useLayoutEffect(() => {
+    if (showDropdown && dropdownRef.current) {
+      const dropdownRect = dropdownRef.current.getBoundingClientRect();
+      if (dropdownRect.bottom > window.innerHeight - 10) {
+        dropdownRef.current.style.top = 'auto';
+        dropdownRef.current.style.bottom = 'calc(100% + 4px)';
+      } else {
+        dropdownRef.current.style.top = 'calc(100% + 4px)';
+        dropdownRef.current.style.bottom = 'auto';
+      }
+    }
+  }, [showDropdown]);
+
   return (
     <div
+      ref={toolbarRef}
       id="text-formatting-toolbar"
       style={{
-        position: 'absolute',
-        top: `${activeEdit.top}px`,
-        left: `${activeEdit.left}px`,
+        position: 'fixed',
+        top: `${pos.top}px`,
+        left: `${pos.left}px`,
         background: 'rgba(30, 30, 36, 0.95)',
         backdropFilter: 'blur(12px)',
         border: '1px solid rgba(255, 255, 255, 0.1)',
@@ -87,7 +139,7 @@ const FontToolbar = ({ activeEdit, updateActiveSpanStyle, fontFamilies, colors }
         display: 'flex',
         alignItems: 'center',
         gap: '12px',
-        zIndex: 1000,
+        zIndex: 10000,
         boxShadow: '0 10px 30px -10px rgba(0,0,0,0.5)',
         pointerEvents: 'auto',
       }}
@@ -117,23 +169,26 @@ const FontToolbar = ({ activeEdit, updateActiveSpanStyle, fontFamilies, colors }
         </button>
 
         {showDropdown && (
-          <div style={{
-            position: 'absolute',
-            top: 'calc(100% + 4px)',
-            left: 0,
-            background: 'rgba(30, 30, 36, 0.98)',
-            border: '1px solid rgba(255,255,255,0.1)',
-            borderRadius: '8px',
-            padding: '4px',
-            display: 'flex',
-            flexDirection: 'column',
-            gap: '2px',
-            minWidth: '160px',
-            maxHeight: '200px',
-            overflowY: 'auto',
-            boxShadow: '0 4px 12px rgba(0,0,0,0.5)',
-            zIndex: 1001,
-          }}>
+          <div 
+            ref={dropdownRef}
+            style={{
+              position: 'absolute',
+              top: 'calc(100% + 4px)',
+              left: 0,
+              background: 'rgba(30, 30, 36, 0.98)',
+              border: '1px solid rgba(255,255,255,0.1)',
+              borderRadius: '8px',
+              padding: '4px',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '2px',
+              minWidth: '160px',
+              maxHeight: '200px',
+              overflowY: 'auto',
+              boxShadow: '0 4px 12px rgba(0,0,0,0.5)',
+              zIndex: 10001,
+            }}
+          >
             {fontFamilies.map((f: any) => (
               <button
                 key={f.name}
@@ -482,8 +537,6 @@ const TextLayerOverlay: React.FC<Props> = ({ pdfProxy, pageIndex, viewport, canv
               currentFontWeight: currentWeight,
               currentFontStyle: currentItalic,
               currentColor: activeColor,
-              top: (sy - currentSize * 0.8) * scaleFactor - 45,
-              left: sx * scaleFactor
             });
 
           });
@@ -627,7 +680,7 @@ const TextLayerOverlay: React.FC<Props> = ({ pdfProxy, pageIndex, viewport, canv
     span.style.color = newEdit.currentColor;
     span.dataset.textColor = newEdit.currentColor;
 
-    newEdit.top = (newEdit.sy - newEdit.currentFontSize * viewport.scale * 0.8) * scaleFactor - 45;
+
 
     setActiveEdit(newEdit);
     span.focus();
@@ -667,28 +720,30 @@ const TextLayerOverlay: React.FC<Props> = ({ pdfProxy, pageIndex, viewport, canv
   ];
 
   return (
-    <div
-      ref={containerRef}
-      style={{
-        position:      'absolute',
-        top:           0,
-        left:          0,
-        width:         '100%',
-        height:        '100%',
-        pointerEvents: 'auto',
-        zIndex:        5,
-        overflow:      'hidden',
-      }}
-    >
-      {activeEdit && (
+    <>
+      <div
+        ref={containerRef}
+        style={{
+          position:      'absolute',
+          top:           0,
+          left:          0,
+          width:         '100%',
+          height:        '100%',
+          pointerEvents: 'auto',
+          zIndex:        5,
+          overflow:      'hidden',
+        }}
+      />
+      {activeEdit && typeof document !== 'undefined' && ReactDOM.createPortal(
         <FontToolbar
           activeEdit={activeEdit}
           updateActiveSpanStyle={updateActiveSpanStyle}
           fontFamilies={fontFamilies}
           colors={colors}
-        />
+        />,
+        document.body
       )}
-    </div>
+    </>  
   );
 };
 
