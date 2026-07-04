@@ -234,31 +234,39 @@ export const usePdfStore = create<PdfState>((set, get) => ({
 
     set({ isProcessing: true });
     try {
-      const newPdfDoc = await PDFDocument.load(bytes);
-      const newPageCount = newPdfDoc.getPageCount();
+      const importedDoc = await PDFDocument.load(bytes);
+      const newPageCount = importedDoc.getPageCount();
       
-      const copiedPages = await pdfDoc.copyPages(newPdfDoc, Array.from({ length: newPageCount }, (_, i) => i));
+      const finalPdfDoc = await PDFDocument.create();
+      const existingIndices = pages.map(p => p.originalIndex);
+      const copiedExisting = await finalPdfDoc.copyPages(pdfDoc, existingIndices);
+      
+      const newIndices = Array.from({ length: newPageCount }, (_, i) => i);
+      const copiedNew = await finalPdfDoc.copyPages(importedDoc, newIndices);
       
       const idx = insertIndex !== undefined ? insertIndex : pages.length;
-      copiedPages.forEach((page, i) => pdfDoc.insertPage(idx + i, page));
+      
+      const allCopied = [...copiedExisting];
+      allCopied.splice(idx, 0, ...copiedNew);
+      allCopied.forEach(page => finalPdfDoc.addPage(page));
 
-      const addedPages: PageInfo[] = Array.from({ length: newPageCount }, (_, i) => ({
+      const addedPages: PageInfo[] = Array.from({ length: newPageCount }, () => ({
         id: `page-${crypto.randomUUID()}`,
-        originalIndex: idx + i,
+        originalIndex: 0,
         rotation: 0,
         annotations: [],
       }));
 
-      const newBytes = await pdfDoc.save();
       const newPagesState = [...pages];
       newPagesState.splice(idx, 0, ...addedPages);
       
-      // Sync originalIndex
       const syncedPages = newPagesState.map((p, i) => ({ ...p, originalIndex: i }));
+      const newBytes = await finalPdfDoc.save();
 
       set({ 
         pdfBytes: newBytes,
         pages: syncedPages,
+        pdfDoc: finalPdfDoc,
         pdfProxy: null,
         currentPageIndex: idx
       });
@@ -280,26 +288,33 @@ export const usePdfStore = create<PdfState>((set, get) => ({
 
     set({ isProcessing: true });
     try {
+      const finalPdfDoc = await PDFDocument.create();
+      const existingIndices = pages.map(p => p.originalIndex);
+      const copiedExisting = await finalPdfDoc.copyPages(pdfDoc, existingIndices);
+      
       const idx = insertIndex !== undefined ? insertIndex : pages.length;
-      pdfDoc.insertPage(idx, [595.28, 841.89]);
+      
+      for(let i=0; i<idx; i++) finalPdfDoc.addPage(copiedExisting[i]);
+      finalPdfDoc.addPage([595.28, 841.89]);
+      for(let i=idx; i<copiedExisting.length; i++) finalPdfDoc.addPage(copiedExisting[i]);
       
       const addedPage: PageInfo = {
         id: `page-${crypto.randomUUID()}`,
-        originalIndex: idx,
+        originalIndex: 0,
         rotation: 0,
         annotations: [],
       };
 
-      const newBytes = await pdfDoc.save();
       const newPagesState = [...pages];
       newPagesState.splice(idx, 0, addedPage);
       
-      // Sync originalIndex
       const syncedPages = newPagesState.map((p, i) => ({ ...p, originalIndex: i }));
+      const newBytes = await finalPdfDoc.save();
 
       set({ 
         pdfBytes: newBytes,
         pages: syncedPages,
+        pdfDoc: finalPdfDoc,
         pdfProxy: null,
         currentPageIndex: idx
       });
@@ -324,40 +339,42 @@ export const usePdfStore = create<PdfState>((set, get) => ({
       const base64Data = dataUrl.split(',')[1];
       const imageBytes = Uint8Array.from(atob(base64Data), c => c.charCodeAt(0));
       
+      const finalPdfDoc = await PDFDocument.create();
+      const existingIndices = pages.map(p => p.originalIndex);
+      const copiedExisting = await finalPdfDoc.copyPages(pdfDoc, existingIndices);
+
       let embeddedImage;
       if (dataUrl.includes('image/png')) {
-        embeddedImage = await pdfDoc.embedPng(imageBytes);
+        embeddedImage = await finalPdfDoc.embedPng(imageBytes);
       } else {
-        embeddedImage = await pdfDoc.embedJpg(imageBytes);
+        embeddedImage = await finalPdfDoc.embedJpg(imageBytes);
       }
 
       const { width, height } = embeddedImage.scale(1);
       const idx = insertIndex !== undefined ? insertIndex : pages.length;
-      const page = pdfDoc.insertPage(idx, [width, height]);
-      page.drawImage(embeddedImage, {
-        x: 0,
-        y: 0,
-        width,
-        height,
-      });
+      
+      for(let i=0; i<idx; i++) finalPdfDoc.addPage(copiedExisting[i]);
+      const newPage = finalPdfDoc.addPage([width, height]);
+      newPage.drawImage(embeddedImage, { x: 0, y: 0, width, height });
+      for(let i=idx; i<copiedExisting.length; i++) finalPdfDoc.addPage(copiedExisting[i]);
 
       const addedPage: PageInfo = {
         id: `page-${crypto.randomUUID()}`,
-        originalIndex: idx,
+        originalIndex: 0,
         rotation: 0,
         annotations: [],
       };
 
-      const newBytes = await pdfDoc.save();
       const newPagesState = [...pages];
       newPagesState.splice(idx, 0, addedPage);
       
-      // Sync originalIndex
       const syncedPages = newPagesState.map((p, i) => ({ ...p, originalIndex: i }));
+      const newBytes = await finalPdfDoc.save();
 
       set({ 
         pdfBytes: newBytes,
         pages: syncedPages,
+        pdfDoc: finalPdfDoc,
         pdfProxy: null,
         currentPageIndex: idx
       });
@@ -406,27 +423,32 @@ export const usePdfStore = create<PdfState>((set, get) => ({
 
     set({ isProcessing: true });
     try {
-      // Physically remove page from pdf-lib doc
-      pdfDoc.removePage(index);
-      
-      const newPages = pages.filter((_, i) => i !== index).map((p, i) => ({
+      const newPages = pages.filter((_, i) => i !== index);
+      const newCurrentIndex = currentPageIndex >= newPages.length ? newPages.length - 1 : currentPageIndex;
+
+      const finalPdfDoc = await PDFDocument.create();
+      const indices = newPages.map(p => p.originalIndex);
+      const copiedPages = await finalPdfDoc.copyPages(pdfDoc, indices);
+      copiedPages.forEach(page => finalPdfDoc.addPage(page));
+
+      const syncedPages = newPages.map((p, i) => ({
         ...p,
-        originalIndex: i // Reset originalIndex to match new physical structure
+        originalIndex: i
       }));
 
-      const newCurrentIndex = currentPageIndex >= newPages.length ? newPages.length - 1 : currentPageIndex;
-      const newBytes = await pdfDoc.save();
+      const newBytes = await finalPdfDoc.save();
 
       set({ 
-        pages: newPages, 
+        pages: syncedPages, 
         currentPageIndex: newCurrentIndex,
+        pdfDoc: finalPdfDoc,
         pdfBytes: newBytes,
-        pdfProxy: null // Force refresh
+        pdfProxy: null
       });
       
       await saveDocument({
         bytes: newBytes,
-        state: { pages: newPages, currentPageIndex: newCurrentIndex, fileName }
+        state: { pages: syncedPages, currentPageIndex: newCurrentIndex, fileName }
       });
     } catch (error) {
       console.error('Error deleting page:', error);
@@ -625,15 +647,15 @@ export const usePdfStore = create<PdfState>((set, get) => ({
               return { r, g, b };
             };
 
-            // Generous white-out rectangle to eliminate smudges (descenders, etc)
-            const paddingY = fontSize * 0.25;
-            const paddingX = fontSize * 0.1;
+            // Tight white-out rectangle — minimal padding to avoid cutting into adjacent lines/borders
+            const paddingY = fontSize * 0.1; // just enough for descenders
+            const paddingX = fontSize * 0.05;
 
             page.drawRectangle({
               x:      annX - paddingX,
-              y:      baselineY - paddingY, // extend below baseline for descenders
+              y:      baselineY - paddingY, // small descender allowance
               width:  annW + paddingX * 2,
-              height: annH + paddingY * 2,
+              height: annH + paddingY * 1.5, // don't extend too far above text
               color:  { type: 'RGB' as any, red: 1, green: 1, blue: 1 } as any,
             });
 

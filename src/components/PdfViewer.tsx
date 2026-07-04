@@ -109,11 +109,20 @@ const PdfViewer: React.FC = () => {
       const context = canvas.getContext('2d');
       if (!context) return;
 
-      canvas.height = vp.height;
-      canvas.width = vp.width;
+      const outputScale = typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1;
+      
+      canvas.width = Math.floor(vp.width * outputScale);
+      canvas.height = Math.floor(vp.height * outputScale);
+      canvas.style.width = Math.floor(vp.width) + "px";
+      canvas.style.height =  Math.floor(vp.height) + "px";
+
+      const transform = outputScale !== 1 
+        ? [outputScale, 0, 0, outputScale, 0, 0] 
+        : undefined;
 
       const renderTask = page.render({
         canvasContext: context,
+        transform: transform,
         viewport: vp,
         canvas: canvas,
       });
@@ -127,6 +136,11 @@ const PdfViewer: React.FC = () => {
 
       if (textAnns.length > 0) {
         context.save();
+        const outputScale = typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1;
+        if (outputScale !== 1) {
+          context.scale(outputScale, outputScale);
+        }
+        
         for (const ann of textAnns) {
           // ann.points[0].y is the % of the TOP of the text block from the top of natural page
           const pdfX       = (ann.points[0].x / 100) * naturalVp.width;
@@ -144,19 +158,16 @@ const PdfViewer: React.FC = () => {
           context.translate(sx, sy);
           context.rotate((vp.rotation * Math.PI) / 180);
           
-          // White-out original area with generous padding to prevent smudges
-          const paddingY = screenFontSize * 0.25;
-          const paddingX = screenFontSize * 0.1;
+          // Tight white-out — minimal padding to avoid cutting into adjacent lines/borders
+          const paddingY = screenFontSize * 0.1;
+          const paddingX = screenFontSize * 0.05;
           const rectH = (ann.height || 0) / 100 * naturalVp.height * vp.scale;
 
           context.fillStyle = '#ffffff';
           // Since origin is baseline (0,0), we go UP by (rectH) and DOWN by paddingY
-          context.fillRect(-paddingX, -rectH - paddingY/2, origW + paddingX * 2, rectH + paddingY * 1.5);
+          context.fillRect(-paddingX, -rectH, origW + paddingX * 2, rectH + paddingY);
 
           context.textBaseline = 'alphabetic'; // Align perfectly with PDF baseline
-          
-          // Slightly reduce opacity to thin out heavy canvas anti-aliasing
-          context.globalAlpha = 0.9;
 
           // Draw segments if available, otherwise single text
           const segments = ann.segments;
@@ -184,8 +195,6 @@ const PdfViewer: React.FC = () => {
             context.fillText(ann.data!, 0, 0);
           }
 
-          context.globalAlpha = 1.0;
-          
           context.restore();
         }
         context.restore();

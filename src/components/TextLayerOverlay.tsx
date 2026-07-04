@@ -320,9 +320,9 @@ const TextLayerOverlay: React.FC<Props> = ({ pdfProxy, pageIndex, viewport, canv
 
     const updateScale = () => {
       const displayWidth = canvas.clientWidth;
-      const internalWidth = canvas.width || viewport.width;
-      if (internalWidth > 0 && displayWidth > 0) {
-        setScaleFactor(displayWidth / internalWidth);
+      const logicalWidth = viewport.width;
+      if (logicalWidth > 0 && displayWidth > 0) {
+        setScaleFactor(displayWidth / logicalWidth);
       }
     };
 
@@ -435,8 +435,8 @@ const TextLayerOverlay: React.FC<Props> = ({ pdfProxy, pageIndex, viewport, canv
           const existingAnn = store.pages[pageIndex]?.annotations.find(
             (a) =>
               a.type === 'text' &&
-              Math.abs(a.points[0].x - natX) < 0.5 &&
-              Math.abs(a.points[0].y - natY) < 0.5
+              Math.abs(a.points[0].x - natX) < 0.01 &&
+              Math.abs(a.points[0].y - natY) < 0.01
           );
 
           const originalStr = item.str;
@@ -521,7 +521,14 @@ const TextLayerOverlay: React.FC<Props> = ({ pdfProxy, pageIndex, viewport, canv
               span.dataset.colorSampled = 'true';
               const ctx = canvasRef.current.getContext('2d', { willReadFrequently: true });
               if (ctx) {
-                const sampled = extractColorFromCanvas(ctx, sx, sy - currentSize * 0.8, screenW, currentSize * 1.2);
+                const outputScale = typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1;
+                const sampled = extractColorFromCanvas(
+                  ctx, 
+                  sx * outputScale, 
+                  (sy - currentSize * 0.8) * outputScale, 
+                  screenW * outputScale, 
+                  (currentSize * 1.2) * outputScale
+                );
                 if (sampled) {
                   span.dataset.textColor = sampled;
                 }
@@ -626,8 +633,8 @@ const TextLayerOverlay: React.FC<Props> = ({ pdfProxy, pageIndex, viewport, canv
               const freshAnn = store.pages[pageIndex]?.annotations.find(
                 (a) =>
                   a.type === 'text' &&
-                  Math.abs(a.points[0].x - natX) < 0.5 &&
-                  Math.abs(a.points[0].y - natY) < 0.5
+                  Math.abs(a.points[0].x - natX) < 0.01 &&
+                  Math.abs(a.points[0].y - natY) < 0.01
               );
 
               // ── 1. Paint white-out + new text directly on the canvas ───
@@ -636,6 +643,12 @@ const TextLayerOverlay: React.FC<Props> = ({ pdfProxy, pageIndex, viewport, canv
                 const ctx = canvas.getContext('2d');
                 if (ctx) {
                   ctx.save();
+                  
+                  const outputScale = typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1;
+                  if (outputScale !== 1) {
+                    ctx.scale(outputScale, outputScale);
+                  }
+
                   ctx.translate(sx, sy);
                   ctx.rotate((viewport.rotation * Math.PI) / 180);
                   
@@ -644,13 +657,13 @@ const TextLayerOverlay: React.FC<Props> = ({ pdfProxy, pageIndex, viewport, canv
                   const newNatW = (newScreenW / viewport.scale / naturalVp.width) * 100;
                   const finalNatW = Math.max(newNatW, freshAnn?.width || natW);
 
-                  const paddingY = activeScreenFontSize * 0.25;
-                  const paddingX = activeScreenFontSize * 0.1;
+                  const paddingY = activeScreenFontSize * 0.1;
+                  const paddingX = activeScreenFontSize * 0.05;
                   const rectH = (item.height / naturalVp.height) * 100 / 100 * naturalVp.height * viewport.scale;
 
                   ctx.fillStyle = '#ffffff';
                   const paintW = (finalNatW / 100 * naturalVp.width * viewport.scale);
-                  ctx.fillRect(-paddingX, -rectH - paddingY/2, paintW + paddingX * 2, rectH + paddingY * 1.5);
+                  ctx.fillRect(-paddingX, -rectH, paintW + paddingX * 2, rectH + paddingY);
                   
                   ctx.textBaseline = 'alphabetic';
 
@@ -704,8 +717,10 @@ const TextLayerOverlay: React.FC<Props> = ({ pdfProxy, pageIndex, viewport, canv
                   ...annData,
                 });
               }
-
-              setActiveEdit(null);
+              const isAnotherSpan = document.activeElement && document.activeElement.tagName === 'SPAN' && (document.activeElement as HTMLElement).isContentEditable;
+              if (!isAnotherSpan) {
+                setActiveEdit(null);
+              }
             }, 150);
           });
 
