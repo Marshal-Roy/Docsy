@@ -61,6 +61,31 @@ const PdfViewer: React.FC = () => {
     };
   }, [pdfProxy, currentPageIndex, pages]);
 
+  // Keyboard arrow navigation
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Don't navigate if user is typing in an editable element
+      const active = document.activeElement;
+      if (!active) return;
+      const tag = active.tagName.toLowerCase();
+      if (tag === 'input' || tag === 'textarea') return;
+      if ((active as HTMLElement).isContentEditable) return;
+      // Also skip if a contenteditable span is focused (text editing)
+      if (active.getAttribute('contenteditable') === 'true') return;
+
+      if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') {
+        e.preventDefault();
+        setCurrentPage(Math.max(0, currentPageIndex - 1));
+      } else if (e.key === 'ArrowRight' || e.key === 'ArrowDown') {
+        e.preventDefault();
+        setCurrentPage(Math.min(pages.length - 1, currentPageIndex + 1));
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [currentPageIndex, pages.length, setCurrentPage]);
+
   const renderPage = async () => {
     if (!canvasRef.current || !pdfProxy || pages.length === 0) return;
 
@@ -128,17 +153,37 @@ const PdfViewer: React.FC = () => {
           // Since origin is baseline (0,0), we go UP by (rectH) and DOWN by paddingY
           context.fillRect(-paddingX, -rectH - paddingY/2, origW + paddingX * 2, rectH + paddingY * 1.5);
 
-          // Draw replacement text exactly on baseline
-          const ff   = ann.fontFamily || 'Arial, Helvetica, sans-serif';
-          const isBold = ann.fontWeight === 'bold';
-          const isItalic = ann.fontStyle === 'italic';
-          context.fillStyle    = ann.color || '#000000';
-          context.font         = `${isBold ? 'bold ' : ''}${isItalic ? 'italic ' : ''}${screenFontSize}px ${ff}`;
           context.textBaseline = 'alphabetic'; // Align perfectly with PDF baseline
           
           // Slightly reduce opacity to thin out heavy canvas anti-aliasing
           context.globalAlpha = 0.9;
-          context.fillText(ann.data!, 0, 0);
+
+          // Draw segments if available, otherwise single text
+          const segments = ann.segments;
+          if (segments && segments.length > 0) {
+            let xOff = 0;
+            for (const seg of segments) {
+              const segFam = seg.fontFamily || ann.fontFamily || 'Arial, Helvetica, sans-serif';
+              const segBold = (seg.fontWeight || ann.fontWeight || 'normal') === 'bold';
+              const segItalic = (seg.fontStyle || ann.fontStyle || 'normal') === 'italic';
+              const segSize = (seg.fontSize || ann.fontSize || 12) * vp.scale;
+              const segColor = seg.color || ann.color || '#000000';
+
+              context.fillStyle = segColor;
+              context.font = `${segBold ? 'bold ' : ''}${segItalic ? 'italic ' : ''}${segSize}px ${segFam}`;
+              context.fillText(seg.text, xOff, 0);
+              xOff += context.measureText(seg.text).width;
+            }
+          } else {
+            // Legacy single-text fallback
+            const ff   = ann.fontFamily || 'Arial, Helvetica, sans-serif';
+            const isBold = ann.fontWeight === 'bold';
+            const isItalic = ann.fontStyle === 'italic';
+            context.fillStyle    = ann.color || '#000000';
+            context.font         = `${isBold ? 'bold ' : ''}${isItalic ? 'italic ' : ''}${screenFontSize}px ${ff}`;
+            context.fillText(ann.data!, 0, 0);
+          }
+
           context.globalAlpha = 1.0;
           
           context.restore();
