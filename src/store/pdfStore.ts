@@ -4,6 +4,15 @@ import { saveDocument, loadDocument, clearDocument, PersistedDoc } from '@/lib/p
 
 export type AnnotationType = 'highlight' | 'pen' | 'comment' | 'text' | 'image';
 
+export interface TextSegment {
+  text: string;
+  color?: string;
+  fontWeight?: string;
+  fontStyle?: string;
+  fontFamily?: string;
+  fontSize?: number;
+}
+
 export interface Annotation {
   id: string;
   type: AnnotationType;
@@ -18,6 +27,7 @@ export interface Annotation {
   fontWeight?: string; // For text ('normal', 'bold', etc)
   fontStyle?: string; // For text ('normal', 'italic', etc)
   originalWidth?: number; // For text white-out
+  segments?: TextSegment[]; // Per-word/selection formatting segments
 }
 
 interface PageInfo {
@@ -573,29 +583,47 @@ export const usePdfStore = create<PdfState>((set, get) => ({
             const annW = Math.max(ann.width || 0, ann.originalWidth || 0) * width / 100;
             const fontSize  = Math.max(ann.fontSize || 12, 4);
 
-            const isBold = ann.fontWeight === 'bold';
-            const isItalic = ann.fontStyle === 'italic';
-            let fontToUse = StandardFonts.Helvetica;
-            const fam = (ann.fontFamily || '').toLowerCase();
-            
-            if (fam.includes('times') || (fam.includes('serif') && !fam.includes('sans'))) {
-              if (isBold && isItalic) fontToUse = StandardFonts.TimesRomanBoldItalic;
-              else if (isBold) fontToUse = StandardFonts.TimesRomanBold;
-              else if (isItalic) fontToUse = StandardFonts.TimesRomanItalic;
-              else fontToUse = StandardFonts.TimesRoman;
-            } else if (fam.includes('courier') || fam.includes('mono')) {
-              if (isBold && isItalic) fontToUse = StandardFonts.CourierBoldOblique;
-              else if (isBold) fontToUse = StandardFonts.CourierBold;
-              else if (isItalic) fontToUse = StandardFonts.CourierOblique;
-              else fontToUse = StandardFonts.Courier;
-            } else {
-              if (isBold && isItalic) fontToUse = StandardFonts.HelveticaBoldOblique;
-              else if (isBold) fontToUse = StandardFonts.HelveticaBold;
-              else if (isItalic) fontToUse = StandardFonts.HelveticaOblique;
-              else fontToUse = StandardFonts.Helvetica;
-            }
+            // Helper to resolve StandardFont from family/weight/style
+            const resolveFont = (fam: string, bold: boolean, italic: boolean) => {
+              const famLower = fam.toLowerCase();
+              if (famLower.includes('times') || (famLower.includes('serif') && !famLower.includes('sans'))) {
+                if (bold && italic) return StandardFonts.TimesRomanBoldItalic;
+                if (bold) return StandardFonts.TimesRomanBold;
+                if (italic) return StandardFonts.TimesRomanItalic;
+                return StandardFonts.TimesRoman;
+              }
+              if (famLower.includes('courier') || famLower.includes('mono')) {
+                if (bold && italic) return StandardFonts.CourierBoldOblique;
+                if (bold) return StandardFonts.CourierBold;
+                if (italic) return StandardFonts.CourierOblique;
+                return StandardFonts.Courier;
+              }
+              if (bold && italic) return StandardFonts.HelveticaBoldOblique;
+              if (bold) return StandardFonts.HelveticaBold;
+              if (italic) return StandardFonts.HelveticaOblique;
+              return StandardFonts.Helvetica;
+            };
 
-            const embeddedFont = await newPdfDoc.embedFont(fontToUse);
+            // Helper to parse color to RGB fractions
+            const parseColorToRgb = (col: string) => {
+              let r = 0, g = 0, b = 0;
+              if (col.startsWith('rgb(')) {
+                const match = col.match(/rgb\((\d+),\s*(\d+),\s*(\d+)\)/);
+                if (match) {
+                  r = parseInt(match[1]) / 255;
+                  g = parseInt(match[2]) / 255;
+                  b = parseInt(match[3]) / 255;
+                }
+              } else if (col.startsWith('#')) {
+                const hex = col.replace('#', '');
+                if (hex.length >= 6) {
+                  r = parseInt(hex.substring(0, 2), 16) / 255;
+                  g = parseInt(hex.substring(2, 4), 16) / 255;
+                  b = parseInt(hex.substring(4, 6), 16) / 255;
+                }
+              }
+              return { r, g, b };
+            };
 
             // Generous white-out rectangle to eliminate smudges (descenders, etc)
             const paddingY = fontSize * 0.25;
@@ -609,33 +637,48 @@ export const usePdfStore = create<PdfState>((set, get) => ({
               color:  { type: 'RGB' as any, red: 1, green: 1, blue: 1 } as any,
             });
 
-            // Parse color string to RGB fractions
-            let r = 0, g = 0, b = 0;
-            const col = ann.color || '';
-            if (col.startsWith('rgb(')) {
-              const match = col.match(/rgb\((\d+),\s*(\d+),\s*(\d+)\)/);
-              if (match) {
-                r = parseInt(match[1]) / 255;
-                g = parseInt(match[2]) / 255;
-                b = parseInt(match[3]) / 255;
-              }
-            } else if (col.startsWith('#')) {
-              const hex = col.replace('#', '');
-              if (hex.length >= 6) {
-                r = parseInt(hex.substring(0, 2), 16) / 255;
-                g = parseInt(hex.substring(2, 4), 16) / 255;
-                b = parseInt(hex.substring(4, 6), 16) / 255;
-              }
-            }
+            // Render segments if available, otherwise fall back to single text
+            const segments = ann.segments;
+            if (segments && segments.length > 0) {
+              let xOffset = annX;
+              for (const seg of segments) {
+                const segFam = seg.fontFamily || ann.fontFamily || '';
+                const segBold = (seg.fontWeight || ann.fontWeight || 'normal') === 'bold';
+                const segItalic = (seg.fontStyle || ann.fontStyle || 'normal') === 'italic';
+                const segSize = Math.max(seg.fontSize || fontSize, 4);
+                const segColor = seg.color || ann.color || '#000000';
+                
+                const fontEnum = resolveFont(segFam, segBold, segItalic);
+                const embFont = await newPdfDoc.embedFont(fontEnum);
+                const { r, g, b } = parseColorToRgb(segColor);
 
-            // Replacement text at exact baseline
-            page.drawText(ann.data, {
-              x:    annX,
-              y:    baselineY,
-              size: fontSize,
-              font: embeddedFont,
-              color: { type: 'RGB' as any, red: r, green: g, blue: b } as any,
-            });
+                page.drawText(seg.text, {
+                  x: xOffset,
+                  y: baselineY,
+                  size: segSize,
+                  font: embFont,
+                  color: { type: 'RGB' as any, red: r, green: g, blue: b } as any,
+                });
+
+                // Advance x by segment text width
+                xOffset += embFont.widthOfTextAtSize(seg.text, segSize);
+              }
+            } else {
+              // Legacy single-text fallback
+              const isBold = ann.fontWeight === 'bold';
+              const isItalic = ann.fontStyle === 'italic';
+              const fontEnum = resolveFont(ann.fontFamily || '', isBold, isItalic);
+              const embeddedFont = await newPdfDoc.embedFont(fontEnum);
+              const { r, g, b } = parseColorToRgb(ann.color || '');
+
+              page.drawText(ann.data, {
+                x:    annX,
+                y:    baselineY,
+                size: fontSize,
+                font: embeddedFont,
+                color: { type: 'RGB' as any, red: r, green: g, blue: b } as any,
+              });
+            }
           }
 
           if (ann.type === 'image' && ann.points[0] && ann.data) {

@@ -459,7 +459,24 @@ const TextLayerOverlay: React.FC<Props> = ({ pdfProxy, pageIndex, viewport, canv
           const currentColor = existingAnn?.color || initialTextColor;
 
           const span = document.createElement('span');
-          span.textContent = displayStr;
+          // Reconstruct inner styled spans if annotation has segments
+          const annSegments = existingAnn?.segments;
+          if (annSegments && annSegments.length > 0) {
+            span.textContent = ''; // Clear
+            for (const seg of annSegments) {
+              const inner = document.createElement('span');
+              inner.textContent = seg.text;
+              if (seg.color) inner.style.color = 'transparent'; // hidden initially
+              if (seg.fontWeight) inner.style.fontWeight = seg.fontWeight;
+              if (seg.fontStyle) inner.style.fontStyle = seg.fontStyle;
+              if (seg.fontFamily) inner.style.fontFamily = seg.fontFamily;
+              if (seg.fontSize) inner.style.fontSize = `${seg.fontSize * viewport.scale * scaleFactor}px`;
+              inner.dataset.segColor = seg.color || currentColor;
+              span.appendChild(inner);
+            }
+          } else {
+            span.textContent = displayStr;
+          }
           span.dataset.original = originalStr;
           span.dataset.textColor = currentColor;
 
@@ -520,6 +537,13 @@ const TextLayerOverlay: React.FC<Props> = ({ pdfProxy, pageIndex, viewport, canv
               zIndex:     '300',
             });
 
+            // Make inner styled spans visible with their actual colors
+            const innerSpans = span.querySelectorAll('span');
+            innerSpans.forEach(s => {
+              const segCol = s.dataset.segColor || activeColor;
+              s.style.color = segCol;
+            });
+
             // Set active edit formatting values
             setActiveEdit({
               span,
@@ -559,25 +583,44 @@ const TextLayerOverlay: React.FC<Props> = ({ pdfProxy, pageIndex, viewport, canv
             setTimeout(async () => {
               // If activeElement is still pointing to this span, we clear it.
               if (document.activeElement === span) return; 
+              // Also check if focus moved to toolbar
+              const toolbar = document.getElementById('text-formatting-toolbar');
+              if (toolbar && toolbar.contains(document.activeElement)) return;
 
               span.contentEditable = 'false';
               const newStr = (span.textContent ?? '').replace(/\n/g, '');
 
-              // Restore invisible
-              Object.assign(span.style, {
-                color:      'transparent',
-                background: 'transparent',
-                outline:    'none',
-                zIndex:     '2',
-              });
-
-              // Read final styling from span style properties
+              // Read final styling from span style properties (defaults)
               const finalFontFamily = span.style.fontFamily || ff;
               const finalFontSizeStr = span.style.fontSize || '';
               const finalFontSize = parseFloat(finalFontSizeStr) / (viewport.scale * scaleFactor) || pdfFontSize;
               const finalFontWeight = span.style.fontWeight || 'normal';
               const finalFontStyle = span.style.fontStyle || 'normal';
               const finalColor = span.dataset.textColor || currentColor;
+
+              // Extract per-word segments before hiding
+              const segments = extractSegmentsFromSpan(span, {
+                ff: finalFontFamily,
+                fontSize: finalFontSize,
+                fontWeight: finalFontWeight,
+                fontStyle: finalFontStyle,
+                color: finalColor,
+              });
+              const hasSegments = segments.length > 1 || (segments.length === 1 && segments.some(s => 
+                s.color !== finalColor || s.fontWeight !== finalFontWeight || 
+                s.fontStyle !== finalFontStyle || s.fontFamily !== finalFontFamily
+              ));
+
+              // Restore invisible — also hide inner styled spans
+              Object.assign(span.style, {
+                color:      'transparent',
+                background: 'transparent',
+                outline:    'none',
+                zIndex:     '2',
+              });
+              // Make all inner spans transparent too
+              const innerSpans = span.querySelectorAll('span');
+              innerSpans.forEach(s => { s.style.color = 'transparent'; });
 
               const store = usePdfStore.getState();
               const freshAnn = store.pages[pageIndex]?.annotations.find(
@@ -609,10 +652,26 @@ const TextLayerOverlay: React.FC<Props> = ({ pdfProxy, pageIndex, viewport, canv
                   const paintW = (finalNatW / 100 * naturalVp.width * viewport.scale);
                   ctx.fillRect(-paddingX, -rectH - paddingY/2, paintW + paddingX * 2, rectH + paddingY * 1.5);
                   
-                  ctx.fillStyle = finalColor;
-                  ctx.font      = `${finalFontWeight === 'bold' ? 'bold ' : ''}${finalFontStyle === 'italic' ? 'italic ' : ''}${activeScreenFontSize}px ${finalFontFamily}`;
                   ctx.textBaseline = 'alphabetic';
-                  ctx.fillText(newStr, 0, 0);
+
+                  // Draw segments if available
+                  if (hasSegments && segments.length > 0) {
+                    let xOff = 0;
+                    for (const seg of segments) {
+                      const segFam = seg.fontFamily || finalFontFamily;
+                      const segBold = (seg.fontWeight || 'normal') === 'bold';
+                      const segItalic = (seg.fontStyle || 'normal') === 'italic';
+                      const segSize = (seg.fontSize || finalFontSize) * viewport.scale;
+                      ctx.fillStyle = seg.color || finalColor;
+                      ctx.font = `${segBold ? 'bold ' : ''}${segItalic ? 'italic ' : ''}${segSize}px ${segFam}`;
+                      ctx.fillText(seg.text, xOff, 0);
+                      xOff += ctx.measureText(seg.text).width;
+                    }
+                  } else {
+                    ctx.fillStyle = finalColor;
+                    ctx.font = `${finalFontWeight === 'bold' ? 'bold ' : ''}${finalFontStyle === 'italic' ? 'italic ' : ''}${activeScreenFontSize}px ${finalFontFamily}`;
+                    ctx.fillText(newStr, 0, 0);
+                  }
                   ctx.restore();
                 }
               }
@@ -621,31 +680,28 @@ const TextLayerOverlay: React.FC<Props> = ({ pdfProxy, pageIndex, viewport, canv
               const newNatW = (newScreenW / viewport.scale / naturalVp.width) * 100;
               const finalNatW = Math.max(newNatW, freshAnn?.width || natW);
 
-              // ── 2. Save to store ────────────────────────────────────────
+              // ── 2. Save to store (with segments) ─────────────────────────
+              const annData: any = {
+                data:  newStr,
+                width: finalNatW,
+                fontFamily: finalFontFamily,
+                fontSize: finalFontSize,
+                fontWeight: finalFontWeight,
+                fontStyle: finalFontStyle,
+                color: finalColor,
+                segments: hasSegments ? segments : undefined,
+              };
+
               if (freshAnn) {
-                store.updateAnnotation(pageIndex, freshAnn.id, {
-                  data:  newStr,
-                  width: finalNatW,
-                  fontFamily: finalFontFamily,
-                  fontSize: finalFontSize,
-                  fontWeight: finalFontWeight,
-                  fontStyle: finalFontStyle,
-                  color: finalColor,
-                });
+                store.updateAnnotation(pageIndex, freshAnn.id, annData);
               } else {
                 store.addAnnotation(pageIndex, {
                   type:          'text',
                   points:        [{ x: natX, y: natY }],
-                  width:         finalNatW,
                   height:        natH,
                   originalWidth: natW,
-                  color:         finalColor,
                   opacity:       1,
-                  data:          newStr,
-                  fontSize:      finalFontSize,     
-                  fontFamily:    finalFontFamily,
-                  fontWeight:    finalFontWeight,
-                  fontStyle:     finalFontStyle,
+                  ...annData,
                 });
               }
 
@@ -663,28 +719,112 @@ const TextLayerOverlay: React.FC<Props> = ({ pdfProxy, pageIndex, viewport, canv
     buildLayer();
   }, [pdfProxy, pageIndex, viewport, scaleFactor]);
 
-  // Handle toolbar interactions
+  // Helper: extract segments from span's child nodes for per-word formatting
+  const extractSegmentsFromSpan = (span: HTMLSpanElement, defaults: { ff: string; fontSize: number; fontWeight: string; fontStyle: string; color: string }) => {
+    const segments: { text: string; color?: string; fontWeight?: string; fontStyle?: string; fontFamily?: string; fontSize?: number }[] = [];
+    const walk = (node: Node) => {
+      if (node.nodeType === Node.TEXT_NODE) {
+        const text = node.textContent || '';
+        if (text.length > 0) {
+          // Inherit styles from closest styled parent (inner span) or use defaults
+          let el = node.parentElement;
+          // If parent is the outer span itself, use defaults
+          if (el === span) {
+            segments.push({
+              text,
+              color: defaults.color,
+              fontWeight: defaults.fontWeight,
+              fontStyle: defaults.fontStyle,
+              fontFamily: defaults.ff,
+              fontSize: defaults.fontSize,
+            });
+          } else if (el) {
+            segments.push({
+              text,
+              color: el.style.color || defaults.color,
+              fontWeight: el.style.fontWeight || defaults.fontWeight,
+              fontStyle: el.style.fontStyle || defaults.fontStyle,
+              fontFamily: el.style.fontFamily || defaults.ff,
+              fontSize: el.style.fontSize ? parseFloat(el.style.fontSize) / (viewport.scale * scaleFactor) : defaults.fontSize,
+            });
+          }
+        }
+      } else if (node.nodeType === Node.ELEMENT_NODE) {
+        for (const child of Array.from(node.childNodes)) {
+          walk(child);
+        }
+      }
+    };
+    for (const child of Array.from(span.childNodes)) {
+      walk(child);
+    }
+    return segments;
+  };
+
+  // Handle toolbar interactions — applies formatting to selected text only
   const updateActiveSpanStyle = (updater: (edit: ActiveEdit) => Partial<ActiveEdit>) => {
     if (!activeEdit) return;
     const updates = updater(activeEdit);
     const newEdit = { ...activeEdit, ...updates };
-
     const { span } = newEdit;
-    
-    span.style.fontFamily = newEdit.currentFontFamily;
-    
-    const sizeInPx = newEdit.currentFontSize * viewport.scale * scaleFactor;
-    span.style.fontSize = `${sizeInPx}px`;
-    span.style.lineHeight = `${sizeInPx}px`;
-    span.style.top = `${(newEdit.sy - newEdit.currentFontSize * viewport.scale * 0.8) * scaleFactor}px`;
 
-    span.style.fontWeight = newEdit.currentFontWeight;
-    span.style.fontStyle = newEdit.currentFontStyle;
-    
-    span.style.color = newEdit.currentColor;
-    span.dataset.textColor = newEdit.currentColor;
+    // Check if there's a text selection within the span
+    const sel = window.getSelection();
+    const hasSelection = sel && sel.rangeCount > 0 && !sel.isCollapsed && span.contains(sel.anchorNode) && span.contains(sel.focusNode);
 
+    if (hasSelection && sel) {
+      // Apply formatting ONLY to the selected range
+      const range = sel.getRangeAt(0);
+      const selectedText = range.toString();
+      if (selectedText.length > 0) {
+        // Create a styled wrapper span for the selection
+        const wrapper = document.createElement('span');
+        // Copy current formatting from the updates
+        if ('currentColor' in updates) {
+          wrapper.style.color = newEdit.currentColor;
+        }
+        if ('currentFontWeight' in updates) {
+          wrapper.style.fontWeight = newEdit.currentFontWeight;
+        }
+        if ('currentFontStyle' in updates) {
+          wrapper.style.fontStyle = newEdit.currentFontStyle;
+        }
+        if ('currentFontFamily' in updates) {
+          wrapper.style.fontFamily = newEdit.currentFontFamily;
+        }
+        if ('currentFontSize' in updates) {
+          const sizeInPx = newEdit.currentFontSize * viewport.scale * scaleFactor;
+          wrapper.style.fontSize = `${sizeInPx}px`;
+        }
 
+        try {
+          range.surroundContents(wrapper);
+        } catch (e) {
+          // surroundContents fails if selection crosses element boundaries
+          // Fall back: extract contents, wrap, and re-insert
+          const fragment = range.extractContents();
+          wrapper.appendChild(fragment);
+          range.insertNode(wrapper);
+        }
+
+        // Clear selection after applying
+        sel.removeAllRanges();
+      }
+    } else {
+      // No selection — apply to entire span (legacy behavior)
+      span.style.fontFamily = newEdit.currentFontFamily;
+
+      const sizeInPx = newEdit.currentFontSize * viewport.scale * scaleFactor;
+      span.style.fontSize = `${sizeInPx}px`;
+      span.style.lineHeight = `${sizeInPx}px`;
+      span.style.top = `${(newEdit.sy - newEdit.currentFontSize * viewport.scale * 0.8) * scaleFactor}px`;
+
+      span.style.fontWeight = newEdit.currentFontWeight;
+      span.style.fontStyle = newEdit.currentFontStyle;
+
+      span.style.color = newEdit.currentColor;
+      span.dataset.textColor = newEdit.currentColor;
+    }
 
     setActiveEdit(newEdit);
     span.focus();
