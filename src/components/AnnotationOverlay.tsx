@@ -10,7 +10,7 @@ interface Props {
 }
 
 const InteractiveImage: React.FC<{ ann: Annotation, width: number, height: number, viewport?: any, pageIndex?: number, scaleFactor: number }> = ({ ann, width, height, viewport, pageIndex, scaleFactor }) => {
-  const { updateAnnotation, selectedAnnotationId, setSelectedAnnotationId, deleteAnnotation } = usePdfStore();
+  const { updateAnnotation, selectedAnnotationId, setSelectedAnnotationId, setPendingDelete } = usePdfStore();
   const [isDragging, setIsDragging] = useState(false);
   const [isResizing, setIsResizing] = useState<string | null>(null);
   const lastX = useRef(0);
@@ -49,8 +49,8 @@ const InteractiveImage: React.FC<{ ann: Annotation, width: number, height: numbe
       if (e.key === 'Delete' || e.key === 'Backspace') {
         const tag = document.activeElement?.tagName.toLowerCase();
         if (tag === 'textarea' || tag === 'input') return;
-        usePdfStore.getState().deleteAnnotation(pageIndex, ann.id);
-        setSelectedAnnotationId(null);
+        const typeName = ann.type === 'image' ? 'image' : ann.type === 'comment' ? 'comment' : 'annotation';
+        usePdfStore.getState().setPendingDelete({ type: 'annotation', pageIndex, annotationId: ann.id, message: `Are you sure you want to delete this ${typeName}?` });
       }
     };
     window.addEventListener('keydown', handleKeyDown);
@@ -246,8 +246,8 @@ const InteractiveImage: React.FC<{ ann: Annotation, width: number, height: numbe
           <g
              transform={`translate(${scaledW - 12}, -12)`}
              style={{ cursor: 'pointer', pointerEvents: 'auto' }}
-             onMouseDown={(e) => { e.stopPropagation(); if (pageIndex !== undefined) { deleteAnnotation(pageIndex, ann.id); setSelectedAnnotationId(null); } }}
-             onTouchStart={(e) => { e.stopPropagation(); if (pageIndex !== undefined) { deleteAnnotation(pageIndex, ann.id); setSelectedAnnotationId(null); } }}
+             onMouseDown={(e) => { e.stopPropagation(); if (pageIndex !== undefined) { setPendingDelete({ type: 'annotation', pageIndex, annotationId: ann.id, message: `Are you sure you want to delete this image?` }); } }}
+             onTouchStart={(e) => { e.stopPropagation(); if (pageIndex !== undefined) { setPendingDelete({ type: 'annotation', pageIndex, annotationId: ann.id, message: `Are you sure you want to delete this image?` }); } }}
           >
              <circle cx={12} cy={12} r={10} fill="#ef4444" stroke="white" strokeWidth={2} />
              <path d="M8 8 L16 16 M16 8 L8 16" stroke="white" strokeWidth={2} strokeLinecap="round" />
@@ -275,7 +275,7 @@ const InteractiveImage: React.FC<{ ann: Annotation, width: number, height: numbe
 };
 
 const InteractiveComment: React.FC<{ ann: Annotation, width: number, height: number, viewport?: any, pageIndex?: number, scaleFactor: number }> = ({ ann, width, height, viewport, pageIndex, scaleFactor }) => {
-  const { updateAnnotation, selectedAnnotationId, setSelectedAnnotationId, deleteAnnotation } = usePdfStore();
+  const { updateAnnotation, selectedAnnotationId, setSelectedAnnotationId, setPendingDelete } = usePdfStore();
   const [isDragging, setIsDragging] = useState(false);
   const [isResizing, setIsResizing] = useState<string | null>(null);
   const lastX = useRef(0);
@@ -324,8 +324,8 @@ const InteractiveComment: React.FC<{ ann: Annotation, width: number, height: num
       if (e.key === 'Delete' || e.key === 'Backspace') {
         const tag = document.activeElement?.tagName.toLowerCase();
         if (tag === 'textarea' || tag === 'input') return;
-        usePdfStore.getState().deleteAnnotation(pageIndex, ann.id);
-        setSelectedAnnotationId(null);
+        const typeName = ann.type === 'image' ? 'image' : ann.type === 'comment' ? 'comment' : 'annotation';
+        usePdfStore.getState().setPendingDelete({ type: 'annotation', pageIndex, annotationId: ann.id, message: `Are you sure you want to delete this ${typeName}?` });
       }
     };
     window.addEventListener('keydown', handleKeyDown);
@@ -552,8 +552,8 @@ const InteractiveComment: React.FC<{ ann: Annotation, width: number, height: num
           <g
              transform={`translate(${scaledW - 12}, -12)`}
              style={{ cursor: 'pointer', pointerEvents: 'auto' }}
-             onMouseDown={(e) => { e.stopPropagation(); if (pageIndex !== undefined) { deleteAnnotation(pageIndex, ann.id); setSelectedAnnotationId(null); } }}
-             onTouchStart={(e) => { e.stopPropagation(); if (pageIndex !== undefined) { deleteAnnotation(pageIndex, ann.id); setSelectedAnnotationId(null); } }}
+             onMouseDown={(e) => { e.stopPropagation(); if (pageIndex !== undefined) { setPendingDelete({ type: 'annotation', pageIndex, annotationId: ann.id, message: `Are you sure you want to delete this comment?` }); } }}
+             onTouchStart={(e) => { e.stopPropagation(); if (pageIndex !== undefined) { setPendingDelete({ type: 'annotation', pageIndex, annotationId: ann.id, message: `Are you sure you want to delete this comment?` }); } }}
           >
              <circle cx={12} cy={12} r={10} fill="#ef4444" stroke="white" strokeWidth={2} />
              <path d="M8 8 L16 16 M16 8 L8 16" stroke="white" strokeWidth={2} strokeLinecap="round" />
