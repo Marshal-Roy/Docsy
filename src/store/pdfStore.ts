@@ -70,6 +70,8 @@ interface PdfState {
   reorderPages: (activeId: string, overId: string) => void;
   hydrate: () => Promise<boolean>;
   exportPdf: () => Promise<Uint8Array>;
+  pendingDelete: { type: 'page' | 'annotation', pageIndex: number, annotationId?: string, message?: string } | null;
+  setPendingDelete: (pending: { type: 'page' | 'annotation', pageIndex: number, annotationId?: string, message?: string } | null) => void;
 }
 
 export const usePdfStore = create<PdfState>((set, get) => ({
@@ -83,6 +85,9 @@ export const usePdfStore = create<PdfState>((set, get) => ({
   activeTool: 'select',
   activeColor: '#fbbf24', // Default highlight yellow
   selectedAnnotationId: null,
+  pendingDelete: null,
+
+  setPendingDelete: (pending) => set({ pendingDelete: pending }),
 
   setPdf: async (bytes: Uint8Array, name: string) => {
     set({ isProcessing: true });

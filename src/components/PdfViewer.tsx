@@ -21,8 +21,10 @@ const PdfViewer: React.FC = () => {
   const { 
     pdfBytes, pages, currentPageIndex, setCurrentPage, rotatePage, deletePage, exportPdf, 
     isProcessing, pdfProxy, setPdfProxy, activeTool, setTool, activeColor, setColor, addAnnotation,
-    addBlankPage, addImagePage, addPages, selectedAnnotationId, setSelectedAnnotationId, deleteAnnotation
+    addBlankPage, addImagePage, addPages, selectedAnnotationId, setSelectedAnnotationId, deleteAnnotation,
+    pendingDelete, setPendingDelete
   } = usePdfStore();
+  const [isExporting, setIsExporting] = useState(false);
 
   const toolButtons: { id: any; icon: any; label: string }[] = [
     { id: 'pen', icon: <PenLine size={18} />, label: 'Draw' },
@@ -350,14 +352,19 @@ const PdfViewer: React.FC = () => {
   };
 
   const handleDownload = async () => {
-    const bytes = await exportPdf();
-    const blob = new Blob([bytes as any], { type: 'application/pdf' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = 'edited_docsy.pdf';
-    a.click();
-    URL.revokeObjectURL(url);
+    setIsExporting(true);
+    try {
+      const bytes = await exportPdf();
+      const blob = new Blob([bytes as any], { type: 'application/pdf' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'edited_docsy.pdf';
+      a.click();
+      URL.revokeObjectURL(url);
+    } finally {
+      setIsExporting(false);
+    }
   };
 
   if (!pdfBytes) return null;
@@ -367,7 +374,7 @@ const PdfViewer: React.FC = () => {
       <ThumbnailSidebar />
       
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '20px', padding: '20px', position: 'relative', overflowY: 'auto' }}>
-        {isProcessing && (
+        {(isProcessing || isExporting) && (
           <div style={{
             position: 'fixed',
             top: 0, left: 0, right: 0, bottom: 0,
@@ -388,7 +395,7 @@ const PdfViewer: React.FC = () => {
               gap: '12px'
             }}>
               <Loader2 className="animate-spin" size={32} />
-              Processing Page Changes...
+              {isExporting ? 'Exporting PDF...' : 'Processing Page Changes...'}
             </div>
           </div>
         )}
@@ -558,10 +565,20 @@ const PdfViewer: React.FC = () => {
               title={selectedAnnotationId ? "Delete Selected Item" : "Delete Page"}
               onClick={() => {
                 if (selectedAnnotationId) {
-                  deleteAnnotation(currentPageIndex, selectedAnnotationId);
-                  setSelectedAnnotationId(null);
+                  const ann = pages[currentPageIndex]?.annotations.find((a: any) => a.id === selectedAnnotationId);
+                  const typeName = ann?.type === 'image' ? 'image' : ann?.type === 'text' ? 'text block' : ann?.type === 'comment' ? 'comment' : 'annotation';
+                  setPendingDelete({ 
+                    type: 'annotation', 
+                    pageIndex: currentPageIndex, 
+                    annotationId: selectedAnnotationId,
+                    message: `Are you sure you want to delete this ${typeName}?`
+                  });
                 } else {
-                  deletePage(currentPageIndex);
+                  setPendingDelete({ 
+                    type: 'page', 
+                    pageIndex: currentPageIndex,
+                    message: `Are you sure you want to delete Page ${currentPageIndex + 1}?`
+                  });
                 }
               }}
               disabled={!selectedAnnotationId && pages.length <= 1}
@@ -645,6 +662,57 @@ const PdfViewer: React.FC = () => {
             </>
           )}
         </div>
+
+        {pendingDelete && (
+          <div style={{
+            position: 'fixed',
+            top: 0, left: 0, right: 0, bottom: 0,
+            background: 'rgba(0,0,0,0.5)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 2000,
+            backdropFilter: 'blur(2px)'
+          }}>
+            <div className="glass" style={{
+              background: 'white',
+              padding: '24px',
+              borderRadius: '12px',
+              maxWidth: '400px',
+              width: '90%',
+              boxShadow: '0 20px 40px rgba(0,0,0,0.2)'
+            }}>
+              <h3 style={{ marginTop: 0, marginBottom: '12px', fontSize: '1.2rem', color: '#111' }}>Confirm Deletion</h3>
+              <p style={{ marginBottom: '24px', color: '#444' }}>
+                {pendingDelete.message || `Are you sure you want to delete this ${pendingDelete.type}? This action cannot be undone.`}
+              </p>
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px' }}>
+                <button 
+                  className="glass-interactive"
+                  onClick={() => setPendingDelete(null)}
+                  style={{ padding: '8px 16px', borderRadius: '6px', border: '1px solid #ccc', background: 'transparent', cursor: 'pointer' }}
+                >
+                  Cancel
+                </button>
+                <button 
+                  className="glass-interactive"
+                  onClick={() => {
+                    if (pendingDelete.type === 'annotation' && pendingDelete.annotationId) {
+                      deleteAnnotation(pendingDelete.pageIndex, pendingDelete.annotationId);
+                      if (selectedAnnotationId === pendingDelete.annotationId) setSelectedAnnotationId(null);
+                    } else if (pendingDelete.type === 'page') {
+                      deletePage(pendingDelete.pageIndex);
+                    }
+                    setPendingDelete(null);
+                  }}
+                  style={{ padding: '8px 16px', borderRadius: '6px', border: 'none', background: '#ef4444', color: 'white', cursor: 'pointer' }}
+                >
+                  Delete
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
