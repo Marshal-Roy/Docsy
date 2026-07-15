@@ -652,15 +652,16 @@ export const usePdfStore = create<PdfState>((set, get) => ({
               return { r, g, b };
             };
 
-            // Tight white-out rectangle — minimal padding to avoid cutting into adjacent lines/borders
-            const paddingY = fontSize * 0.1; // just enough for descenders
-            const paddingX = fontSize * 0.05;
+            // Tight white-out rectangle — slightly increased padding to prevent original text ghosting/overlap (which makes text look bolder)
+            const paddingBottom = fontSize * 0.25; 
+            const paddingTop = fontSize * 0.2; 
+            const paddingX = fontSize * 0.1;
 
             page.drawRectangle({
               x:      annX - paddingX,
-              y:      baselineY - paddingY, // small descender allowance
+              y:      baselineY - paddingBottom, // bottom of rect
               width:  annW + paddingX * 2,
-              height: annH + paddingY * 1.5, // don't extend too far above text
+              height: annH + paddingTop + paddingBottom, // fully cover text ascenders/descenders
               color:  { type: 'RGB' as any, red: 1, green: 1, blue: 1 } as any,
             });
 

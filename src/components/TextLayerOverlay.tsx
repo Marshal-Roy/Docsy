@@ -462,14 +462,15 @@ const TextLayerOverlay: React.FC<Props> = ({ pdfProxy, pageIndex, viewport, canv
           // Reconstruct inner styled spans if annotation has segments
           const annSegments = existingAnn?.segments;
           if (annSegments && annSegments.length > 0) {
-            span.textContent = ''; // Clear
+            span.textContent = '';
             for (const seg of annSegments) {
               const inner = document.createElement('span');
               inner.textContent = seg.text;
-              if (seg.color) inner.style.color = 'transparent'; // hidden initially
+              if (seg.color) inner.style.color = 'transparent';
               if (seg.fontWeight) inner.style.fontWeight = seg.fontWeight;
               if (seg.fontStyle) inner.style.fontStyle = seg.fontStyle;
               if (seg.fontFamily) inner.style.fontFamily = seg.fontFamily;
+              // seg.fontSize is in PDF pts; convert to display px via viewport.scale * scaleFactor
               if (seg.fontSize) inner.style.fontSize = `${seg.fontSize * viewport.scale * scaleFactor}px`;
               inner.dataset.segColor = seg.color || currentColor;
               span.appendChild(inner);
@@ -480,19 +481,21 @@ const TextLayerOverlay: React.FC<Props> = ({ pdfProxy, pageIndex, viewport, canv
           span.dataset.original = originalStr;
           span.dataset.textColor = currentColor;
 
-          const displayLeft = sx * scaleFactor;
-          const displayTop = (sy - currentSize * 0.8) * scaleFactor;
-          const displayWidth = screenW * scaleFactor;
-          const displayHeight = (currentSize * 1.2) * scaleFactor;
+          // Convert viewport-space coords (sx,sy,screenW,currentSize) to display-space
+          // by multiplying by scaleFactor = canvas.clientWidth / viewport.width
+          const displayLeft     = sx * scaleFactor;
           const displayFontSize = currentSize * scaleFactor;
+          const displayTop      = (sy * scaleFactor) - (displayFontSize * 0.8);
+          const displayWidth    = screenW * scaleFactor;
+          const displayHeight   = displayFontSize * 1.2;
 
           Object.assign(span.style, {
             position:    'absolute',
             left:        `${displayLeft}px`,
             top:         `${displayTop}px`,
-            width:       'auto', 
+            width:       'auto',
             minWidth:    `${displayWidth}px`,
-            height:      `${displayHeight}px`, 
+            height:      `${displayHeight}px`,
             fontSize:    `${displayFontSize}px`,
             lineHeight:  `${displayFontSize}px`,
             fontFamily:  currentFont,
@@ -522,11 +525,12 @@ const TextLayerOverlay: React.FC<Props> = ({ pdfProxy, pageIndex, viewport, canv
               const ctx = canvasRef.current.getContext('2d', { willReadFrequently: true });
               if (ctx) {
                 const outputScale = typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1;
+                // Canvas buffer coords = viewport coords * outputScale
                 const sampled = extractColorFromCanvas(
-                  ctx, 
-                  sx * outputScale, 
-                  (sy - currentSize * 0.8) * outputScale, 
-                  screenW * outputScale, 
+                  ctx,
+                  sx * outputScale,
+                  (sy - currentSize * 0.8) * outputScale,
+                  screenW * outputScale,
                   (currentSize * 1.2) * outputScale
                 );
                 if (sampled) {
@@ -582,6 +586,9 @@ const TextLayerOverlay: React.FC<Props> = ({ pdfProxy, pageIndex, viewport, canv
             span.contentEditable = 'true';
             span.focus();
           });
+          span.addEventListener('input', () => {
+            span.dataset.isDirty = 'true';
+          });
 
           // ── blur: commit edit by painting on canvas + baking into PDF ─
           span.addEventListener('blur', async () => {
@@ -600,10 +607,28 @@ const TextLayerOverlay: React.FC<Props> = ({ pdfProxy, pageIndex, viewport, canv
               // Read final styling from span style properties (defaults)
               const finalFontFamily = span.style.fontFamily || ff;
               const finalFontSizeStr = span.style.fontSize || '';
+              // span fontSize is in display px = pdfPt * viewport.scale * scaleFactor
               const finalFontSize = parseFloat(finalFontSizeStr) / (viewport.scale * scaleFactor) || pdfFontSize;
               const finalFontWeight = span.style.fontWeight || 'normal';
               const finalFontStyle = span.style.fontStyle || 'normal';
               const finalColor = span.dataset.textColor || currentColor;
+
+              // ── Restore invisible state first (always) ──
+              Object.assign(span.style, {
+                color:      'transparent',
+                background: 'transparent',
+                outline:    'none',
+                zIndex:     '2',
+              });
+              const innerSpans = span.querySelectorAll('span');
+              innerSpans.forEach(s => { s.style.color = 'transparent'; });
+
+              // Exit early if nothing changed — avoids artifacts from spurious canvas paints
+              if (span.dataset.isDirty !== 'true') {
+                const isAnotherSpanEarly = document.activeElement && document.activeElement.tagName === 'SPAN' && (document.activeElement as HTMLElement).isContentEditable;
+                if (!isAnotherSpanEarly) setActiveEdit(null);
+                return;
+              }
 
               // Extract per-word segments before hiding
               const segments = extractSegmentsFromSpan(span, {
@@ -613,21 +638,10 @@ const TextLayerOverlay: React.FC<Props> = ({ pdfProxy, pageIndex, viewport, canv
                 fontStyle: finalFontStyle,
                 color: finalColor,
               });
-              const hasSegments = segments.length > 1 || (segments.length === 1 && segments.some(s => 
-                s.color !== finalColor || s.fontWeight !== finalFontWeight || 
+              const hasSegments = segments.length > 1 || (segments.length === 1 && segments.some(s =>
+                s.color !== finalColor || s.fontWeight !== finalFontWeight ||
                 s.fontStyle !== finalFontStyle || s.fontFamily !== finalFontFamily
               ));
-
-              // Restore invisible — also hide inner styled spans
-              Object.assign(span.style, {
-                color:      'transparent',
-                background: 'transparent',
-                outline:    'none',
-                zIndex:     '2',
-              });
-              // Make all inner spans transparent too
-              const innerSpans = span.querySelectorAll('span');
-              innerSpans.forEach(s => { s.style.color = 'transparent'; });
 
               const store = usePdfStore.getState();
               const freshAnn = store.pages[pageIndex]?.annotations.find(
@@ -638,12 +652,18 @@ const TextLayerOverlay: React.FC<Props> = ({ pdfProxy, pageIndex, viewport, canv
               );
 
               // ── 1. Paint white-out + new text directly on the canvas ───
+              // span.clientWidth is in display px; divide by scaleFactor to get viewport px
+              const spanViewportW = span.clientWidth / scaleFactor;
+              const newNatW_blur = (spanViewportW / viewport.scale / naturalVp.width) * 100;
+              const finalNatW = Math.max(newNatW_blur, freshAnn?.width || natW);
+
               const canvas = canvasRef?.current;
               if (canvas) {
                 const ctx = canvas.getContext('2d');
                 if (ctx) {
                   ctx.save();
-                  
+
+                  // The canvas buffer is viewport-px * devicePixelRatio, so we scale
                   const outputScale = typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1;
                   if (outputScale !== 1) {
                     ctx.scale(outputScale, outputScale);
@@ -651,20 +671,21 @@ const TextLayerOverlay: React.FC<Props> = ({ pdfProxy, pageIndex, viewport, canv
 
                   ctx.translate(sx, sy);
                   ctx.rotate((viewport.rotation * Math.PI) / 180);
-                  
-                  const activeScreenFontSize = finalFontSize * viewport.scale;
-                  const newScreenW = span.clientWidth / scaleFactor;
-                  const newNatW = (newScreenW / viewport.scale / naturalVp.width) * 100;
-                  const finalNatW = Math.max(newNatW, freshAnn?.width || natW);
 
-                  const paddingY = activeScreenFontSize * 0.1;
+                  const activeScreenFontSize = finalFontSize * viewport.scale;
+                  // Increase padding to fully cover ascenders/descenders (overshoots)
+                  const paddingBottom = activeScreenFontSize * 0.25;
+                  const paddingTop = activeScreenFontSize * 0.2;
                   const paddingX = activeScreenFontSize * 0.05;
-                  const rectH = (item.height / naturalVp.height) * 100 / 100 * naturalVp.height * viewport.scale;
+                  // item.height is in PDF pts; convert to canvas (viewport) px
+                  const rectH = item.height * viewport.scale;
 
                   ctx.fillStyle = '#ffffff';
-                  const paintW = (finalNatW / 100 * naturalVp.width * viewport.scale);
-                  ctx.fillRect(-paddingX, -rectH, paintW + paddingX * 2, rectH + paddingY);
-                  
+                  const paintW = finalNatW / 100 * naturalVp.width * viewport.scale;
+                  // Y-axis goes down in canvas. We start at -rectH (up from baseline) minus paddingTop,
+                  // and the total height is rectH + paddingTop + paddingBottom
+                  ctx.fillRect(-paddingX, -rectH - paddingTop, paintW + paddingX * 2, rectH + paddingTop + paddingBottom);
+
                   ctx.textBaseline = 'alphabetic';
 
                   // Draw segments if available
@@ -688,10 +709,6 @@ const TextLayerOverlay: React.FC<Props> = ({ pdfProxy, pageIndex, viewport, canv
                   ctx.restore();
                 }
               }
-
-              const newScreenW = span.clientWidth / scaleFactor;
-              const newNatW = (newScreenW / viewport.scale / naturalVp.width) * 100;
-              const finalNatW = Math.max(newNatW, freshAnn?.width || natW);
 
               // ── 2. Save to store (with segments) ─────────────────────────
               const annData: any = {
@@ -788,6 +805,7 @@ const TextLayerOverlay: React.FC<Props> = ({ pdfProxy, pageIndex, viewport, canv
     const hasSelection = sel && sel.rangeCount > 0 && !sel.isCollapsed && span.contains(sel.anchorNode) && span.contains(sel.focusNode);
 
     if (hasSelection && sel) {
+      span.dataset.isDirty = 'true';
       // Apply formatting ONLY to the selected range
       const range = sel.getRangeAt(0);
       const selectedText = range.toString();
@@ -808,6 +826,7 @@ const TextLayerOverlay: React.FC<Props> = ({ pdfProxy, pageIndex, viewport, canv
           wrapper.style.fontFamily = newEdit.currentFontFamily;
         }
         if ('currentFontSize' in updates) {
+          // Display px = pdfFontSize * viewport.scale * scaleFactor
           const sizeInPx = newEdit.currentFontSize * viewport.scale * scaleFactor;
           wrapper.style.fontSize = `${sizeInPx}px`;
         }
@@ -829,16 +848,17 @@ const TextLayerOverlay: React.FC<Props> = ({ pdfProxy, pageIndex, viewport, canv
       // No selection — apply to entire span (legacy behavior)
       span.style.fontFamily = newEdit.currentFontFamily;
 
+      // Display px = pdfFontSize * viewport.scale * scaleFactor
       const sizeInPx = newEdit.currentFontSize * viewport.scale * scaleFactor;
       span.style.fontSize = `${sizeInPx}px`;
       span.style.lineHeight = `${sizeInPx}px`;
-      span.style.top = `${(newEdit.sy - newEdit.currentFontSize * viewport.scale * 0.8) * scaleFactor}px`;
+      span.style.top = `${(newEdit.sy * scaleFactor) - sizeInPx * 0.8}px`;
 
       span.style.fontWeight = newEdit.currentFontWeight;
       span.style.fontStyle = newEdit.currentFontStyle;
-
       span.style.color = newEdit.currentColor;
       span.dataset.textColor = newEdit.currentColor;
+      span.dataset.isDirty = 'true';
     }
 
     setActiveEdit(newEdit);
