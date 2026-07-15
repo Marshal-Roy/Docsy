@@ -115,8 +115,9 @@ const PdfViewer: React.FC = () => {
       
       canvas.width = Math.floor(vp.width * outputScale);
       canvas.height = Math.floor(vp.height * outputScale);
+      // Only set CSS width; height:auto (from JSX) maintains aspect ratio on small screens
       canvas.style.width = Math.floor(vp.width) + "px";
-      canvas.style.height =  Math.floor(vp.height) + "px";
+      canvas.style.height = 'auto';
 
       const transform = outputScale !== 1 
         ? [outputScale, 0, 0, outputScale, 0, 0] 
@@ -160,14 +161,15 @@ const PdfViewer: React.FC = () => {
           context.translate(sx, sy);
           context.rotate((vp.rotation * Math.PI) / 180);
           
-          // Tight white-out — minimal padding to avoid cutting into adjacent lines/borders
-          const paddingY = screenFontSize * 0.1;
+          // Tight white-out — expanded padding to avoid artifacts from ascenders/descenders
+          const paddingBottom = screenFontSize * 0.25;
+          const paddingTop = screenFontSize * 0.2;
           const paddingX = screenFontSize * 0.05;
           const rectH = (ann.height || 0) / 100 * naturalVp.height * vp.scale;
 
           context.fillStyle = '#ffffff';
-          // Since origin is baseline (0,0), we go UP by (rectH) and DOWN by paddingY
-          context.fillRect(-paddingX, -rectH, origW + paddingX * 2, rectH + paddingY);
+          // Since origin is baseline (0,0), we go UP by (rectH + paddingTop) and DOWN by paddingBottom
+          context.fillRect(-paddingX, -rectH - paddingTop, origW + paddingX * 2, rectH + paddingTop + paddingBottom);
 
           context.textBaseline = 'alphabetic'; // Align perfectly with PDF baseline
 
