@@ -15,7 +15,7 @@ import {
   arrayMove,
   SortableContext,
   sortableKeyboardCoordinates,
-  verticalListSortingStrategy,
+  rectSortingStrategy,
   useSortable
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
@@ -116,8 +116,10 @@ const SortableThumbnail: React.FC<SortableThumbnailProps> = ({
       style={style}
       className={`thumbnail-item ${isActive ? 'active' : ''}`}
       onClick={onClick}
+      {...attributes}
+      {...listeners}
     >
-      <div className="thumbnail-drag-handle" {...attributes} {...listeners}>
+      <div className="thumbnail-drag-handle">
         <GripVertical size={14} />
       </div>
       <div className="thumbnail-preview">
@@ -129,7 +131,12 @@ const SortableThumbnail: React.FC<SortableThumbnailProps> = ({
   );
 };
 
-const ThumbnailSidebar: React.FC = () => {
+interface ThumbnailSidebarProps {
+  isOpen?: boolean;
+  onClose?: () => void;
+}
+
+const ThumbnailSidebar: React.FC<ThumbnailSidebarProps> = ({ isOpen, onClose }) => {
   const { pdfBytes, pages, currentPageIndex, setCurrentPage, reorderPages, addPages, pdfProxy } = usePdfStore();
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -164,8 +171,16 @@ const ThumbnailSidebar: React.FC = () => {
   if (!pdfBytes) return null;
 
   return (
-    <div className="thumbnail-sidebar glass">
-      <div className="sidebar-header">
+    <>
+      {/* Mobile Backdrop */}
+      {isOpen && (
+        <div 
+          className="sidebar-backdrop" 
+          onClick={onClose}
+        />
+      )}
+      <div className={`thumbnail-sidebar glass ${isOpen ? 'open' : ''}`}>
+        <div className="sidebar-header">
         <span>Pages ({pages.length})</span>
       </div>
       <div className="sidebar-content">
@@ -176,7 +191,7 @@ const ThumbnailSidebar: React.FC = () => {
         >
           <SortableContext 
             items={pages.map(p => p.id)}
-            strategy={verticalListSortingStrategy}
+            strategy={rectSortingStrategy}
           >
             {pages.map((page, index) => (
               <SortableThumbnail 
@@ -195,6 +210,7 @@ const ThumbnailSidebar: React.FC = () => {
       </div>
 
     </div>
+    </>
   );
 };
 
