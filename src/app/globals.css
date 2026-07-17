@@ -157,7 +157,22 @@ body {
 /* Responsive Overrides */
 @media (max-width: 768px) {
   .thumbnail-sidebar {
-    display: none;
+    position: fixed;
+    top: 0;
+    left: -280px;
+    width: 280px;
+    height: 100%;
+    z-index: 2000;
+    transition: left 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    border-right: 1px solid var(--border-glass);
+    border-bottom: none;
+    display: flex;
+  }
+  .thumbnail-sidebar.open {
+    left: 0;
+  }
+  .sidebar-backdrop {
+    display: block;
   }
   .header {
     padding: 0 16px;
@@ -165,6 +180,18 @@ body {
   .hide-on-mobile {
     display: none !important;
   }
+  /* Optional: Show hamburger in toolbar */
+  .mobile-menu-btn {
+    display: flex !important;
+  }
+}
+
+.mobile-menu-btn {
+  display: none;
+}
+
+.sidebar-backdrop {
+  display: none;
 }
 
 /* Hide Scrollbar Utility */

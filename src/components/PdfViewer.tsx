@@ -2,7 +2,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import * as pdfjsLib from 'pdfjs-dist';
 import { usePdfStore, Annotation } from '@/store/pdfStore';
-import { RotateCw, Trash2, Download, MousePointer2, Highlighter, PenLine, MessageSquare, ChevronLeft, ChevronRight, Loader2, Type, Image as ImageIcon, PlusSquare, FilePlus, ImagePlus, FileText } from 'lucide-react';
+import { RotateCw, Trash2, Download, MousePointer2, Highlighter, PenLine, MessageSquare, ChevronLeft, ChevronRight, Loader2, Type, Image as ImageIcon, PlusSquare, FilePlus, ImagePlus, FileText, Menu } from 'lucide-react';
 import ThumbnailSidebar from './ThumbnailSidebar';
 import AnnotationOverlay from './AnnotationOverlay';
 import TextLayerOverlay from './TextLayerOverlay';
@@ -25,6 +25,7 @@ const PdfViewer: React.FC = () => {
     pendingDelete, setPendingDelete
   } = usePdfStore();
   const [isExporting, setIsExporting] = useState(false);
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
 
   const toolButtons: { id: any; icon: any; label: string }[] = [
     { id: 'pen', icon: <PenLine size={18} />, label: 'Draw' },
@@ -372,8 +373,8 @@ const PdfViewer: React.FC = () => {
   if (!pdfBytes) return null;
 
   return (
-    <div style={{ display: 'flex', height: '100%', width: '100%', overflow: 'hidden', position: 'relative' }}>
-      <ThumbnailSidebar />
+    <div className="pdf-viewer-container" style={{ display: 'flex', height: '100%', width: '100%', overflow: 'hidden', position: 'relative' }}>
+      <ThumbnailSidebar isOpen={isSidebarOpen} onClose={() => setIsSidebarOpen(false)} />
       
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '20px', padding: '20px', position: 'relative', overflowY: 'auto' }}>
         {(isProcessing || isExporting) && (
@@ -384,7 +385,7 @@ const PdfViewer: React.FC = () => {
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
-            zIndex: 1000,
+            zIndex: 9999,
             backdropFilter: 'blur(4px)'
           }}>
             <div style={{ 
@@ -419,6 +420,13 @@ const PdfViewer: React.FC = () => {
           margin: '0 auto',
         }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <button 
+              className="glass-interactive mobile-menu-btn" 
+              onClick={() => setIsSidebarOpen(true)}
+              style={{ width: '32px', height: '32px', alignItems: 'center', justifyContent: 'center', borderRadius: '6px', color: 'white', border: 'none', background: 'rgba(255,255,255,0.1)' }}
+            >
+              <Menu size={18} />
+            </button>
             <button 
               className="glass-interactive" 
               onClick={() => setCurrentPage(Math.max(0, currentPageIndex - 1))} 
