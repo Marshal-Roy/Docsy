@@ -6,7 +6,8 @@ import {
   DndContext, 
   closestCenter,
   KeyboardSensor,
-  PointerSensor,
+  MouseSensor,
+  TouchSensor,
   useSensor,
   useSensors,
   DragEndEvent
@@ -19,7 +20,7 @@ import {
   useSortable
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
-import { GripVertical, Plus } from 'lucide-react';
+import { GripVertical, Plus, Menu } from 'lucide-react';
 
 interface SortableThumbnailProps {
   id: string;
@@ -141,9 +142,15 @@ const ThumbnailSidebar: React.FC<ThumbnailSidebarProps> = ({ isOpen, onClose }) 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const sensors = useSensors(
-    useSensor(PointerSensor, {
+    useSensor(MouseSensor, {
       activationConstraint: {
         distance: 8,
+      },
+    }),
+    useSensor(TouchSensor, {
+      activationConstraint: {
+        delay: 250,
+        tolerance: 5,
       },
     }),
     useSensor(KeyboardSensor, {
@@ -181,8 +188,23 @@ const ThumbnailSidebar: React.FC<ThumbnailSidebarProps> = ({ isOpen, onClose }) 
       )}
       <div className={`thumbnail-sidebar glass ${isOpen ? 'open' : ''}`}>
         <div className="sidebar-header">
-        <span>Pages ({pages.length})</span>
-      </div>
+          <span>Pages ({pages.length})</span>
+          <button 
+            className="mobile-menu-btn" 
+            onClick={onClose}
+            style={{ 
+              background: 'transparent', 
+              border: 'none', 
+              color: 'var(--text-primary)', 
+              cursor: 'pointer',
+              alignItems: 'center',
+              justifyContent: 'center',
+              padding: '4px'
+            }}
+          >
+            <Menu size={18} />
+          </button>
+        </div>
       <div className="sidebar-content">
         <DndContext 
           sensors={sensors}
