@@ -184,6 +184,9 @@ const ThumbnailSidebar: React.FC<ThumbnailSidebarProps> = ({ isOpen, onClose }) 
         <div 
           className="sidebar-backdrop" 
           onClick={onClose}
+          onMouseDown={onClose}
+          onTouchStart={onClose}
+          style={{ cursor: 'pointer' }}
         />
       )}
       <div className={`thumbnail-sidebar glass ${isOpen ? 'open' : ''}`}>
