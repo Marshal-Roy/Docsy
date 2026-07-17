@@ -171,9 +171,6 @@ body {
   .thumbnail-sidebar.open {
     left: 0;
   }
-  .sidebar-backdrop {
-    display: block;
-  }
   .header {
     padding: 0 16px;
   }
@@ -191,12 +188,12 @@ body {
 }
 
 .sidebar-backdrop {
-  display: none;
   position: fixed;
   top: 0; left: 0; right: 0; bottom: 0;
   background: rgba(0,0,0,0.5);
   z-index: 1999;
   backdrop-filter: blur(2px);
+  pointer-events: auto;
 }
 
 /* Hide Scrollbar Utility */
