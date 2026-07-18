@@ -20,6 +20,7 @@ export interface Annotation {
   width?: number; // % width for rect/image
   height?: number; // % height for rect/image
   color: string;
+  opacity: number;
   data?: string; // Text content or Image base64
   bgColor?: string; // The sampled background color for the text's white-out box
   fontSize?: number; // For text
