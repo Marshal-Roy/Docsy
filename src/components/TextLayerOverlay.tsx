@@ -42,6 +42,40 @@ const extractColorFromCanvas = (ctx: CanvasRenderingContext2D, x: number, y: num
   return null;
 };
 
+const extractBgColorFromCanvas = (ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number): string => {
+  if (w <= 0 || h <= 0) return '#ffffff';
+  try {
+    // Expand the sample area slightly to ensure we capture background
+    const pad = 4;
+    const imgData = ctx.getImageData(x - pad, y - pad, w + pad * 2, h + pad * 2);
+    const data = imgData.data;
+    let rSum = 0, gSum = 0, bSum = 0, count = 0;
+    
+    // Sample only the outer perimeter of the expanded box
+    const isPerimeter = (i: number) => {
+      const px = (i / 4) % (w + pad * 2);
+      const py = Math.floor((i / 4) / (w + pad * 2));
+      return px < pad || px >= w + pad || py < pad || py >= h + pad;
+    };
+
+    for (let i = 0; i < data.length; i += 4) {
+      if (isPerimeter(i)) {
+        const r = data[i], g = data[i+1], b = data[i+2], a = data[i+3];
+        const brightness = (r * 299 + g * 587 + b * 114) / 1000;
+        if (a > 50 && brightness > 200) { // Only sample light colors (typical background)
+          rSum += r; gSum += g; bSum += b; count++;
+        }
+      }
+    }
+    if (count > 0) {
+      return `rgb(${Math.round(rSum/count)}, ${Math.round(gSum/count)}, ${Math.round(bSum/count)})`;
+    }
+  } catch (e) {
+    console.warn("Canvas bg color sampling failed", e);
+  }
+  return '#ffffff';
+};
+
 interface ActiveEdit {
   span: HTMLSpanElement;
   existingAnn?: any;
@@ -313,6 +347,7 @@ const TextLayerOverlay: React.FC<Props> = ({ pdfProxy, pageIndex, viewport, canv
   const containerRef = useRef<HTMLDivElement>(null);
   const [activeEdit, setActiveEdit] = useState<ActiveEdit | null>(null);
   const [scaleFactor, setScaleFactor] = useState(1);
+  const isOcrRunning = usePdfStore((state) => state.isOcrRunning);
 
   useEffect(() => {
     const canvas = canvasRef?.current;
@@ -362,6 +397,74 @@ const TextLayerOverlay: React.FC<Props> = ({ pdfProxy, pageIndex, viewport, canv
           return 'Arial, Helvetica, sans-serif';
         };
 
+        const store = usePdfStore.getState();
+        const matchedAnnIds = new Set<string>();
+        
+        // Pass 1: find matched annotations to isolate unmatched (like OCR)
+        tc.items.forEach((item: any) => {
+          const pdfX = item.transform[4];
+          const pdfBaselineY = item.transform[5];
+          const pdfTopY = pdfBaselineY + item.height; 
+          const natX = (pdfX / naturalVp.width) * 100;
+          const natY = ((naturalVp.height - pdfTopY) / naturalVp.height) * 100;
+          
+          const existingAnn = store.pages[pageIndex]?.annotations.find(
+             (a) =>
+               a.type === 'text' &&
+               Math.abs(a.points[0].x - natX) < 0.01 &&
+               Math.abs(a.points[0].y - natY) < 0.01
+          );
+          if (existingAnn) matchedAnnIds.add(existingAnn.id);
+        });
+
+        // Add unmatched text annotations to tc.items so they get rendered
+        const textAnns = store.pages[pageIndex]?.annotations.filter(a => a.type === 'text') || [];
+        const unmatchedAnns = textAnns.filter(a => !matchedAnnIds.has(a.id));
+        
+        console.log(`TextLayerOverlay [Page ${pageIndex}]: total textAnns=${textAnns.length}, matched=${matchedAnnIds.size}, unmatched=${unmatchedAnns.length}`);
+
+        unmatchedAnns.forEach(ann => {
+          // OCR annotations: points[0].y is percent-from-top (Tesseract origin, top-down).
+          // We need to reconstruct pdfBaselineY in PDF coordinate space (bottom-up).
+          // ann.points[0].y = (pdfY_topdown / naturalVp.height) * 100
+          // where pdfY_topdown = distance from the top of the page.
+          // In PDF space: pdfTopY = naturalVp.height - (percY / 100 * naturalVp.height)
+          //               pdfBaselineY = pdfTopY - pdfHeight
+          // BUT: for the text overlay we store percY as top-down percent directly,
+          // so we reconstruct the PDF-space coords for the faux item transform.
+          const percY = ann.points[0].y;
+          const pdfX = (ann.points[0].x / 100) * naturalVp.width;
+          const pdfHeight_ann = (ann.height || 0) / 100 * naturalVp.height;
+          // pdfY_topdown: distance from page top in natural pt space
+          const pdfY_topdown = (percY / 100) * naturalVp.height;
+          // In PDF coords (bottom-up): top of text block
+          const pdfTopY_ann = naturalVp.height - pdfY_topdown;
+          // baseline = pdfTopY - height (since item.height is the ascent above baseline)
+          const pdfBaselineY_ann = pdfTopY_ann - pdfHeight_ann;
+          const width = (ann.originalWidth || ann.width || 0) / 100 * naturalVp.width;
+          
+          let color = [0,0,0];
+          if (ann.color?.startsWith('#')) {
+             color = [
+               parseInt(ann.color.slice(1,3), 16),
+               parseInt(ann.color.slice(3,5), 16),
+               parseInt(ann.color.slice(5,7), 16)
+             ];
+          }
+          
+          console.log('Injecting faux item for OCR text:', ann.data, 'at', { pdfX, pdfBaselineY_ann, width, pdfHeight_ann });
+
+          tc.items.push({
+            str: ann.data || '',
+            fontName: ann.fontFamily || 'Arial, Helvetica, sans-serif',
+            transform: [1, 0, 0, ann.fontSize || pdfHeight_ann, pdfX, pdfBaselineY_ann],
+            width: width,
+            height: pdfHeight_ann,
+            color: color,
+            _isOcrFaux: true, // Flag to skip canvas-measurement rescaling
+          });
+        });
+
         tc.items.forEach((item: any) => {
           if (!item.str || item.str.trim() === '') return;
 
@@ -407,6 +510,7 @@ const TextLayerOverlay: React.FC<Props> = ({ pdfProxy, pageIndex, viewport, canv
           const basePdfFontSize = Math.abs(item.transform[3]);
           
           let pdfFontSize = basePdfFontSize;
+          // Use canvas-measurement to find the perfect font size to fit the width
           const tempCanvas = document.createElement('canvas');
           const tCtx = tempCanvas.getContext('2d');
           if (tCtx && item.str && item.str.trim().length > 0) {
@@ -414,7 +518,10 @@ const TextLayerOverlay: React.FC<Props> = ({ pdfProxy, pageIndex, viewport, canv
              const metrics = tCtx.measureText(item.str);
              if (metrics.width > 0) {
                  const calculatedSize = (item.width / metrics.width) * 100;
-                 if (calculatedSize > basePdfFontSize * 0.6 && calculatedSize < basePdfFontSize * 1.5) {
+                 if (item._isOcrFaux) {
+                     // For OCR, trust the width-based calculation completely
+                     pdfFontSize = calculatedSize;
+                 } else if (calculatedSize > basePdfFontSize * 0.6 && calculatedSize < basePdfFontSize * 1.5) {
                      pdfFontSize = calculatedSize;
                  }
              }
@@ -431,7 +538,6 @@ const TextLayerOverlay: React.FC<Props> = ({ pdfProxy, pageIndex, viewport, canv
           const natH = (item.height / naturalVp.height) * 100;
 
           // ── 2. Check if we have an edit for this text block ──
-          const store = usePdfStore.getState();
           const existingAnn = store.pages[pageIndex]?.annotations.find(
             (a) =>
               a.type === 'text' &&
@@ -446,9 +552,10 @@ const TextLayerOverlay: React.FC<Props> = ({ pdfProxy, pageIndex, viewport, canv
           const [sx, sy] = viewport.convertToViewportPoint(pdfX, pdfBaselineY);
           const screenW = (existingAnn ? Math.max(existingAnn.width || 0, natW) : natW) / 100 * naturalVp.width * viewport.scale;
           
-          // Use properties from annotation if edit exists
+          // Use properties from annotation if edit exists and has been committed
+          const isCommitted = existingAnn?.isCommitted;
           const currentFont = existingAnn?.fontFamily || ff;
-          const currentSize = (existingAnn && existingAnn.fontSize) ? (existingAnn.fontSize * viewport.scale) : (pdfFontSize * viewport.scale);
+          const currentSize = (existingAnn && isCommitted && existingAnn.fontSize) ? (existingAnn.fontSize * viewport.scale) : (pdfFontSize * viewport.scale);
           const currentWeight = existingAnn?.fontWeight || (bold ? 'bold' : 'normal');
           const currentItalic = existingAnn?.fontStyle || (italic ? 'italic' : 'normal');
 
@@ -538,14 +645,31 @@ const TextLayerOverlay: React.FC<Props> = ({ pdfProxy, pageIndex, viewport, canv
                 }
               }
             }
+            
+            if (!span.dataset.bgColorSampled && canvasRef?.current) {
+              const ctx = canvasRef.current.getContext('2d', { willReadFrequently: true });
+              if (ctx) {
+                const outputScale = typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1;
+                const cw = (span.clientWidth || displayWidth) * outputScale;
+                const ch = (span.clientHeight || displayHeight) * outputScale;
+                const cx = displayLeft * outputScale;
+                const cy = displayTop * outputScale;
+                const bgSampled = extractBgColorFromCanvas(ctx, cx, cy, cw, ch);
+                span.dataset.bgColor = bgSampled;
+                span.dataset.bgColorSampled = 'true';
+              }
+            }
 
             const activeColor = span.dataset.textColor || currentColor;
+            const activeBgColor = span.dataset.bgColor || existingAnn?.bgColor || '#ffffff';
 
             Object.assign(span.style, {
               color:      activeColor,
-              background: '#ffffff',
+              background: activeBgColor,
+              boxShadow:  `0 0 0 6px ${activeBgColor}`,
               outline:    'none',
               zIndex:     '300',
+              borderRadius: '2px',
             });
 
             // Make inner styled spans visible with their actual colors
@@ -612,11 +736,13 @@ const TextLayerOverlay: React.FC<Props> = ({ pdfProxy, pageIndex, viewport, canv
               const finalFontWeight = span.style.fontWeight || 'normal';
               const finalFontStyle = span.style.fontStyle || 'normal';
               const finalColor = span.dataset.textColor || currentColor;
+              const finalBgColor = span.dataset.bgColor || existingAnn?.bgColor || '#ffffff';
 
               // ── Restore invisible state first (always) ──
               Object.assign(span.style, {
                 color:      'transparent',
                 background: 'transparent',
+                boxShadow:  'none',
                 outline:    'none',
                 zIndex:     '2',
               });
@@ -680,7 +806,7 @@ const TextLayerOverlay: React.FC<Props> = ({ pdfProxy, pageIndex, viewport, canv
                   // item.height is in PDF pts; convert to canvas (viewport) px
                   const rectH = item.height * viewport.scale;
 
-                  ctx.fillStyle = '#ffffff';
+                  ctx.fillStyle = finalBgColor;
                   const paintW = finalNatW / 100 * naturalVp.width * viewport.scale;
                   // Y-axis goes down in canvas. We start at -rectH (up from baseline) minus paddingTop,
                   // and the total height is rectH + paddingTop + paddingBottom
@@ -719,7 +845,9 @@ const TextLayerOverlay: React.FC<Props> = ({ pdfProxy, pageIndex, viewport, canv
                 fontWeight: finalFontWeight,
                 fontStyle: finalFontStyle,
                 color: finalColor,
+                bgColor: finalBgColor,
                 segments: hasSegments ? segments : undefined,
+                isCommitted: true, // Mark as committed so renderPage re-paints it on canvas refresh
               };
 
               if (freshAnn) {
@@ -749,7 +877,7 @@ const TextLayerOverlay: React.FC<Props> = ({ pdfProxy, pageIndex, viewport, canv
     };
 
     buildLayer();
-  }, [pdfProxy, pageIndex, viewport, scaleFactor]);
+  }, [pdfProxy, pageIndex, viewport, scaleFactor, isOcrRunning]);
 
   // Helper: extract segments from span's child nodes for per-word formatting
   const extractSegmentsFromSpan = (span: HTMLSpanElement, defaults: { ff: string; fontSize: number; fontWeight: string; fontStyle: string; color: string }) => {

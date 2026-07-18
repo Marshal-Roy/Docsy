@@ -57,7 +57,7 @@ const SortableThumbnail: React.FC<SortableThumbnailProps> = ({
 
   useEffect(() => {
     if (pdfProxy) {
-      triggerRender();
+      renderThumbnail();
     }
     return () => {
       if (renderTaskRef.current) {
@@ -66,21 +66,13 @@ const SortableThumbnail: React.FC<SortableThumbnailProps> = ({
     };
   }, [pdfProxy, rotation, originalIndex]);
 
-  const triggerRender = async () => {
-    // Avoid double-rendering on the same canvas
-    if (isRendering) {
-      if (renderTaskRef.current) {
-        renderTaskRef.current.cancel();
-      }
-      return; 
-    }
-    await renderThumbnail();
-  };
-
   const renderThumbnail = async () => {
     if (!canvasRef.current || !pdfProxy) return;
 
-    setIsRendering(true);
+    if (renderTaskRef.current) {
+      renderTaskRef.current.cancel();
+    }
+
     try {
       const page = await pdfProxy.getPage(originalIndex + 1);
       const viewport = page.getViewport({ scale: 0.2, rotation });
