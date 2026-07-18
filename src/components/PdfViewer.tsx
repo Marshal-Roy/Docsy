@@ -2,7 +2,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import * as pdfjsLib from 'pdfjs-dist';
 import { usePdfStore, Annotation } from '@/store/pdfStore';
-import { RotateCw, Trash2, Download, MousePointer2, Highlighter, PenLine, MessageSquare, ChevronLeft, ChevronRight, Loader2, Type, Image as ImageIcon, PlusSquare, FilePlus, ImagePlus, FileText, Menu } from 'lucide-react';
+import { RotateCw, Trash2, Download, MousePointer2, Highlighter, PenLine, MessageSquare, ChevronLeft, ChevronRight, Loader2, Type, Image as ImageIcon, PlusSquare, FilePlus, ImagePlus, FileText, Menu, FileSearch } from 'lucide-react';
 import ThumbnailSidebar from './ThumbnailSidebar';
 import AnnotationOverlay from './AnnotationOverlay';
 import TextLayerOverlay from './TextLayerOverlay';
@@ -22,10 +22,12 @@ const PdfViewer: React.FC = () => {
     pdfBytes, pages, currentPageIndex, setCurrentPage, rotatePage, deletePage, exportPdf, 
     isProcessing, pdfProxy, setPdfProxy, activeTool, setTool, activeColor, setColor, addAnnotation,
     addBlankPage, addImagePage, addPages, selectedAnnotationId, setSelectedAnnotationId, deleteAnnotation,
-    pendingDelete, setPendingDelete
+    pendingDelete, setPendingDelete, isScanned, isOcrRunning, setIsScanned, runOcrOnPage
   } = usePdfStore();
   const [isExporting, setIsExporting] = useState(false);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+  const [showScannedModal, setShowScannedModal] = useState(false);
+  const [highlightOcr, setHighlightOcr] = useState(false);
 
   const toolButtons: { id: any; icon: any; label: string }[] = [
     { id: 'pen', icon: <PenLine size={18} />, label: 'Draw' },
@@ -44,6 +46,19 @@ const PdfViewer: React.FC = () => {
           const loadingTask = pdfjsLib.getDocument({ data: pdfBytes.slice(0) });
           const pdf = await loadingTask.promise;
           setPdfProxy(pdf);
+          
+          if (!isScanned) { // Only check once
+            try {
+              const firstPage = await pdf.getPage(1);
+              const textContent = await firstPage.getTextContent();
+              if (textContent.items.length === 0) {
+                setIsScanned(true);
+                setShowScannedModal(true);
+              }
+            } catch (err) {
+              console.error('Failed to analyze PDF text content', err);
+            }
+          }
         } catch (error) {
           console.error('Error creating PDF proxy:', error);
         }
@@ -136,7 +151,10 @@ const PdfViewer: React.FC = () => {
 
       // ── Re-paint committed text edits on top of the freshly rendered page ──
       const naturalVp = page.getViewport({ scale: 1, rotation: 0 });
-      const textAnns  = pageInfo.annotations.filter((a) => a.type === 'text' && a.data);
+      // Only re-paint annotations that have been explicitly committed (edited by user).
+      // OCR annotations are freshly added overlays; they have not been painted on the canvas yet.
+      // Painting a white-out rect for them would erase the underlying scanned image content.
+      const textAnns  = pageInfo.annotations.filter((a) => a.type === 'text' && a.data && a.isCommitted);
 
       if (textAnns.length > 0) {
         context.save();
@@ -168,7 +186,7 @@ const PdfViewer: React.FC = () => {
           const paddingX = screenFontSize * 0.05;
           const rectH = (ann.height || 0) / 100 * naturalVp.height * vp.scale;
 
-          context.fillStyle = '#ffffff';
+          context.fillStyle = ann.bgColor || '#ffffff';
           // Since origin is baseline (0,0), we go UP by (rectH + paddingTop) and DOWN by paddingBottom
           context.fillRect(-paddingX, -rectH - paddingTop, origW + paddingX * 2, rectH + paddingTop + paddingBottom);
 
@@ -377,7 +395,7 @@ const PdfViewer: React.FC = () => {
       <ThumbnailSidebar isOpen={isSidebarOpen} onClose={() => setIsSidebarOpen(false)} />
       
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '20px', padding: '20px', position: 'relative', overflowY: 'auto' }}>
-        {(isProcessing || isExporting) && (
+        {(isProcessing || isExporting || isOcrRunning) && (
           <div style={{
             position: 'fixed',
             top: 0, left: 0, right: 0, bottom: 0,
@@ -398,7 +416,7 @@ const PdfViewer: React.FC = () => {
               gap: '12px'
             }}>
               <Loader2 className="animate-spin" size={32} />
-              {isExporting ? 'Exporting PDF...' : 'Processing Page Changes...'}
+              {isOcrRunning ? 'Running OCR... This may take a moment.' : isExporting ? 'Exporting PDF...' : 'Processing Page Changes...'}
             </div>
           </div>
         )}
@@ -475,6 +493,73 @@ const PdfViewer: React.FC = () => {
                   {tool.icon}
                 </button>
               ))}
+              
+              {isScanned && (
+                <>
+                  <div style={{ width: '1px', height: '24px', background: 'var(--border-glass)', margin: '0 4px' }} />
+                  <div style={{ position: 'relative' }}>
+                    <button
+                      onClick={() => runOcrOnPage(currentPageIndex)}
+                      title="Make text editable (OCR)"
+                      style={{
+                        padding: '0 12px',
+                        height: '36px',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '6px',
+                        borderRadius: '8px',
+                        border: '1px solid var(--accent-primary)',
+                        background: highlightOcr ? 'rgba(59, 130, 246, 0.25)' : 'rgba(59, 130, 246, 0.1)',
+                        color: 'var(--accent-primary)',
+                        cursor: 'pointer',
+                        fontWeight: 600,
+                        fontSize: '0.85rem',
+                        transition: 'all 0.3s ease'
+                      }}
+                      className={`hover-glass ${highlightOcr ? 'animate-pulse-glow' : ''}`}
+                    >
+                      <FileSearch size={16} /> OCR Page
+                    </button>
+
+                    {highlightOcr && (
+                      <div style={{
+                        position: 'absolute',
+                        top: 'calc(100% + 14px)',
+                        left: '50%',
+                        transform: 'translateX(-50%)',
+                        zIndex: 100,
+                        pointerEvents: 'none',
+                      }}>
+                        <div className="animate-fade-in" style={{
+                          background: 'var(--accent-primary)',
+                          color: 'white',
+                          padding: '10px 16px',
+                          borderRadius: '8px',
+                          fontSize: '0.85rem',
+                          fontWeight: 500,
+                          whiteSpace: 'nowrap',
+                          boxShadow: 'var(--shadow-premium)',
+                          position: 'relative',
+                        }}>
+                          {/* Upward pointing arrow */}
+                          <div style={{
+                            position: 'absolute',
+                            top: '-6px',
+                            left: '50%',
+                            transform: 'translateX(-50%) rotate(45deg)',
+                            width: '12px',
+                            height: '12px',
+                            background: 'var(--accent-primary)',
+                            borderRadius: '2px 0 0 0',
+                          }} />
+                          <span style={{ position: 'relative', zIndex: 1 }}>Click here to enable text editing! ✨</span>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </>
+              )}
+
               <input 
                 type="file" 
                 ref={imageInputRef} 
@@ -723,6 +808,48 @@ const PdfViewer: React.FC = () => {
             </div>
           </div>
         )}
+        {showScannedModal && (
+          <div style={{
+            position: 'fixed',
+            top: 0, left: 0, right: 0, bottom: 0,
+            background: 'rgba(0,0,0,0.7)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 3000,
+            backdropFilter: 'blur(4px)'
+          }}>
+            <div className="glass" style={{
+              background: 'var(--bg-card)',
+              padding: '32px',
+              borderRadius: '16px',
+              maxWidth: '480px',
+              width: '90%',
+              boxShadow: 'var(--shadow-premium)',
+              textAlign: 'center'
+            }}>
+              <FileSearch size={48} style={{ color: 'var(--accent-primary)', margin: '0 auto 16px' }} />
+              <h3 style={{ marginTop: 0, marginBottom: '16px', fontSize: '1.4rem', color: 'var(--text-primary)' }}>Scanned PDF Detected</h3>
+              <p style={{ marginBottom: '24px', color: 'var(--text-secondary)', lineHeight: 1.5 }}>
+                Looks like the PDF uploaded by you is a scanned PDF. It may take a while to load and text editing may be error prone without OCR, but you will be able to perform other actions properly.
+              </p>
+              <div style={{ display: 'flex', justifyContent: 'center' }}>
+                <button 
+                  className="glass-interactive shadow-accent"
+                  onClick={() => {
+                    setShowScannedModal(false);
+                    setHighlightOcr(true);
+                    setTimeout(() => setHighlightOcr(false), 4500); // 4.5s pulse
+                  }}
+                  style={{ padding: '10px 24px', borderRadius: '8px', border: 'none', background: 'var(--accent-primary)', color: 'white', cursor: 'pointer', fontWeight: 600 }}
+                >
+                  Got it
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
       </div>
     </div>
   );

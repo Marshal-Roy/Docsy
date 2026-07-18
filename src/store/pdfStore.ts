@@ -20,14 +20,15 @@ export interface Annotation {
   width?: number; // % width for rect/image
   height?: number; // % height for rect/image
   color: string;
-  opacity: number;
   data?: string; // Text content or Image base64
+  bgColor?: string; // The sampled background color for the text's white-out box
   fontSize?: number; // For text
   fontFamily?: string; // For text
   fontWeight?: string; // For text ('normal', 'bold', etc)
   fontStyle?: string; // For text ('normal', 'italic', etc)
   originalWidth?: number; // For text white-out
   segments?: TextSegment[]; // Per-word/selection formatting segments
+  isCommitted?: boolean; // True if this annotation has been edited and canvas-painted by the user
 }
 
 interface PageInfo {
@@ -50,8 +51,12 @@ interface PdfState {
   activeTool: EditTool;
   activeColor: string;
   selectedAnnotationId: string | null;
+  isScanned: boolean;
+  isOcrRunning: boolean;
 
   // Actions
+  setIsScanned: (isScanned: boolean) => void;
+  runOcrOnPage: (pageIndex: number) => Promise<void>;
   setPdf: (bytes: Uint8Array, name: string) => Promise<void>;
   setPdfProxy: (proxy: any) => void;
   addPages: (bytes: Uint8Array, insertIndex?: number) => Promise<void>;
@@ -86,6 +91,10 @@ export const usePdfStore = create<PdfState>((set, get) => ({
   activeColor: '#fbbf24', // Default highlight yellow
   selectedAnnotationId: null,
   pendingDelete: null,
+  isScanned: false,
+  isOcrRunning: false,
+
+  setIsScanned: (isScanned) => set({ isScanned }),
 
   setPendingDelete: (pending) => set({ pendingDelete: pending }),
 
@@ -107,7 +116,9 @@ export const usePdfStore = create<PdfState>((set, get) => ({
         pages: initialPages, 
         currentPageIndex: 0,
         fileName: name,
-        pdfProxy: null
+        pdfProxy: null,
+        isScanned: false,
+        isOcrRunning: false
       });
 
       await saveDocument({
@@ -505,6 +516,117 @@ export const usePdfStore = create<PdfState>((set, get) => ({
       } finally {
         set({ isProcessing: false });
       }
+    }
+  },
+
+  runOcrOnPage: async (pageIndex: number) => {
+    const { pdfProxy, pages, pdfBytes, fileName } = get();
+    if (!pdfProxy || !pages[pageIndex]) return;
+
+    set({ isOcrRunning: true });
+    try {
+      // 1. Render page to high-res canvas
+      const pageInfo = pages[pageIndex];
+      const page = await pdfProxy.getPage(pageInfo.originalIndex + 1);
+      
+      const scale = 2.5; // High scale for better OCR accuracy
+      const viewport = page.getViewport({ scale, rotation: pageInfo.rotation });
+      
+      const canvas = document.createElement('canvas');
+      const context = canvas.getContext('2d');
+      if (!context) throw new Error('Could not get canvas context');
+      
+      canvas.width = viewport.width;
+      canvas.height = viewport.height;
+      
+      await page.render({
+        canvasContext: context,
+        viewport: viewport
+      }).promise;
+
+      // 2. Run Tesseract
+      const Tesseract = await import('tesseract.js');
+      const worker = await Tesseract.createWorker('eng');
+      const { data } = await worker.recognize(canvas, {}, { blocks: true });
+      await worker.terminate();
+
+      // 3. Convert OCR results to Annotations
+      // Natural viewport for calculating percentages
+      const naturalVp = page.getViewport({ scale: 1, rotation: 0 });
+      
+      const newAnns: Annotation[] = [];
+      
+      const lines = [];
+      if (data.blocks) {
+        for (const block of data.blocks) {
+          if (!block.paragraphs) continue;
+          for (const para of block.paragraphs) {
+            if (!para.lines) continue;
+            for (const line of para.lines) {
+              lines.push(line);
+            }
+          }
+        }
+      }
+      
+      lines.forEach(line => {
+        if (!line.text.trim()) return;
+        
+        // Tesseract bbox is in the scaled canvas pixel space
+        const { x0, y0, x1, y1 } = line.bbox;
+        
+        // Convert back to natural PDF space
+        const pdfX = x0 / scale;
+        const pdfY = y0 / scale;
+        const pdfWidth = (x1 - x0) / scale;
+        const pdfHeight = (y1 - y0) / scale;
+        
+        // Convert to percentage
+        const percX = (pdfX / naturalVp.width) * 100;
+        // Y coordinate in pdfStore annotations is measured from top-left, same as tesseract
+        const percY = (pdfY / naturalVp.height) * 100;
+        const percWidth = (pdfWidth / naturalVp.width) * 100;
+        const percHeight = (pdfHeight / naturalVp.height) * 100;
+        
+        // Font size in PDF pts: use pdfHeight (the bounding box height in natural PDF units).
+        // The rendering pipeline in TextLayerOverlay treats fontSize as PDF pts and multiplies
+        // by viewport.scale to get screen px — so we store the raw pt value here.
+        const fontSizePt = pdfHeight;
+        
+        newAnns.push({
+          id: crypto.randomUUID(),
+          type: 'text',
+          points: [{ x: percX, y: percY }],
+          width: percWidth,
+          height: percHeight,
+          originalWidth: percWidth,
+          color: '#000000',
+          opacity: 1,
+          data: line.text.trim(),
+          fontSize: fontSizePt,
+          fontFamily: 'Arial, Helvetica, sans-serif'
+        });
+      });
+
+      // 4. Update State
+      const newPages = [...pages];
+      newPages[pageIndex] = {
+        ...newPages[pageIndex],
+        annotations: [...newPages[pageIndex].annotations, ...newAnns]
+      };
+
+      set({ pages: newPages });
+      if (pdfBytes) {
+        saveDocument({
+          bytes: pdfBytes,
+          state: { pages: newPages, currentPageIndex: get().currentPageIndex, fileName }
+        });
+      }
+      
+    } catch (error) {
+      console.error('OCR failed:', error);
+    } finally {
+      set({ isOcrRunning: false });
     }
   },
 
