@@ -22,7 +22,7 @@ const PdfViewer: React.FC = () => {
     pdfBytes, pages, currentPageIndex, setCurrentPage, rotatePage, deletePage, exportPdf, 
     isProcessing, pdfProxy, setPdfProxy, activeTool, setTool, activeColor, setColor, addAnnotation,
     addBlankPage, addImagePage, addPages, selectedAnnotationId, setSelectedAnnotationId, deleteAnnotation,
-    pendingDelete, setPendingDelete, isScanned, isOcrRunning, setIsScanned, runOcrOnPage
+    pendingDelete, setPendingDelete, isScanned, isOcrRunning, setIsScanned, runOcrOnPage, isFromImage
   } = usePdfStore();
   const [isExporting, setIsExporting] = useState(false);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
@@ -48,15 +48,21 @@ const PdfViewer: React.FC = () => {
           setPdfProxy(pdf);
           
           if (!isScanned) { // Only check once
-            try {
-              const firstPage = await pdf.getPage(1);
-              const textContent = await firstPage.getTextContent();
-              if (textContent.items.length === 0) {
-                setIsScanned(true);
-                setShowScannedModal(true);
+            if (isFromImage) {
+              setIsScanned(true);
+              setHighlightOcr(true);
+              setTimeout(() => setHighlightOcr(false), 4500);
+            } else {
+              try {
+                const firstPage = await pdf.getPage(1);
+                const textContent = await firstPage.getTextContent();
+                if (textContent.items.length === 0) {
+                  setIsScanned(true);
+                  setShowScannedModal(true);
+                }
+              } catch (err) {
+                console.error('Failed to analyze PDF text content', err);
               }
-            } catch (err) {
-              console.error('Failed to analyze PDF text content', err);
             }
           }
         } catch (error) {
