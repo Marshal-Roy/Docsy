@@ -54,11 +54,12 @@ interface PdfState {
   selectedAnnotationId: string | null;
   isScanned: boolean;
   isOcrRunning: boolean;
+  isFromImage: boolean;
 
   // Actions
   setIsScanned: (isScanned: boolean) => void;
   runOcrOnPage: (pageIndex: number) => Promise<void>;
-  setPdf: (bytes: Uint8Array, name: string) => Promise<void>;
+  setPdf: (bytes: Uint8Array, name: string, isFromImage?: boolean) => Promise<void>;
   setPdfProxy: (proxy: any) => void;
   addPages: (bytes: Uint8Array, insertIndex?: number) => Promise<void>;
   addBlankPage: (insertIndex?: number) => Promise<void>;
@@ -94,12 +95,13 @@ export const usePdfStore = create<PdfState>((set, get) => ({
   pendingDelete: null,
   isScanned: false,
   isOcrRunning: false,
+  isFromImage: false,
 
   setIsScanned: (isScanned) => set({ isScanned }),
 
   setPendingDelete: (pending) => set({ pendingDelete: pending }),
 
-  setPdf: async (bytes: Uint8Array, name: string) => {
+  setPdf: async (bytes: Uint8Array, name: string, isFromImage: boolean = false) => {
     set({ isProcessing: true });
     try {
       const pdfDoc = await PDFDocument.load(bytes);
@@ -119,7 +121,8 @@ export const usePdfStore = create<PdfState>((set, get) => ({
         fileName: name,
         pdfProxy: null,
         isScanned: false,
-        isOcrRunning: false
+        isOcrRunning: false,
+        isFromImage
       });
 
       await saveDocument({

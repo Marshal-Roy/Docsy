@@ -42,8 +42,63 @@ export default function Home() {
     return () => window.removeEventListener('popstate', handlePopState);
   }, []);
 
-  const handleFileSelect = async (selectedFile: File) => {
-    await setPdf(new Uint8Array(await selectedFile.arrayBuffer()), selectedFile.name);
+  const handleFilesSelect = async (selectedFiles: File[]) => {
+    let bytes: Uint8Array;
+    let name = selectedFiles[0].name;
+    let isFromImage = false;
+    
+    if (selectedFiles.length === 1 && !selectedFiles[0].type.startsWith('image/')) {
+      bytes = new Uint8Array(await selectedFiles[0].arrayBuffer());
+    } else {
+      const { PDFDocument } = await import('pdf-lib');
+      const masterPdf = await PDFDocument.create();
+      
+      for (const file of selectedFiles) {
+        if (file.type.startsWith('image/')) {
+          isFromImage = true;
+          const arrayBuffer = await file.arrayBuffer();
+          let image;
+          
+          try {
+            if (file.type === 'image/jpeg' || file.type === 'image/jpg') {
+              image = await masterPdf.embedJpg(arrayBuffer);
+            } else if (file.type === 'image/png') {
+              image = await masterPdf.embedPng(arrayBuffer);
+            } else {
+              console.warn('Skipping unsupported image format:', file.name);
+              continue;
+            }
+            
+            const { width, height } = image.scale(1);
+            const page = masterPdf.addPage([width, height]);
+            page.drawImage(image, { x: 0, y: 0, width, height });
+          } catch (err) {
+            console.error("Failed to convert image to PDF:", err);
+          }
+        } else if (file.type === 'application/pdf') {
+          try {
+            const arrayBuffer = await file.arrayBuffer();
+            const sourcePdf = await PDFDocument.load(arrayBuffer);
+            const copiedPages = await masterPdf.copyPages(sourcePdf, sourcePdf.getPageIndices());
+            copiedPages.forEach((page) => {
+              masterPdf.addPage(page);
+            });
+          } catch (err) {
+            console.error("Failed to merge PDF:", err);
+          }
+        }
+      }
+      
+      bytes = await masterPdf.save();
+      
+      if (selectedFiles.length === 1) {
+        name = name.replace(/\.[^/.]+$/, "") + ".pdf";
+      } else {
+        name = `Merged_Document_${new Date().getTime()}.pdf`;
+      }
+    }
+
+    await setPdf(bytes, name, isFromImage);
     setView('editor');
     window.history.pushState({ view: 'editor' }, '', '?mode=editor');
   };
@@ -113,7 +168,7 @@ export default function Home() {
         </p>
       </section>
 
-      <Dropzone onFileSelect={handleFileSelect} />
+      <Dropzone onFilesSelect={handleFilesSelect} />
 
       <section aria-labelledby="features-heading" style={{
         width: '100%',

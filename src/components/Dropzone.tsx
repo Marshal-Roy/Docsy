@@ -3,12 +3,12 @@ import React, { useRef, useState } from 'react';
 import { UploadCloud, FileText, CheckCircle2 } from 'lucide-react';
 
 interface DropzoneProps {
-  onFileSelect: (file: File) => void;
+  onFilesSelect: (files: File[]) => void;
 }
 
-const Dropzone: React.FC<DropzoneProps> = ({ onFileSelect }) => {
+const Dropzone: React.FC<DropzoneProps> = ({ onFilesSelect }) => {
   const [isDragActive, setIsDragActive] = useState(false);
-  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleDrag = (e: React.DragEvent) => {
@@ -26,22 +26,29 @@ const Dropzone: React.FC<DropzoneProps> = ({ onFileSelect }) => {
     e.stopPropagation();
     setIsDragActive(false);
     
-    if (e.dataTransfer.files && e.dataTransfer.files[0]) {
-      const file = e.dataTransfer.files[0];
-      if (file.type === "application/pdf") {
-        setSelectedFile(file);
-        onFileSelect(file);
+    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+      const files = Array.from(e.dataTransfer.files).filter(
+        (file) => file.type === "application/pdf" || file.type.startsWith("image/")
+      );
+      
+      if (files.length > 0) {
+        setSelectedFiles(files);
+        onFilesSelect(files);
       } else {
-        alert("Please upload a PDF file.");
+        alert("Please upload PDF or Image files only.");
       }
     }
   };
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files && e.target.files[0]) {
-      const file = e.target.files[0];
-      setSelectedFile(file);
-      onFileSelect(file);
+    if (e.target.files && e.target.files.length > 0) {
+      const files = Array.from(e.target.files).filter(
+        (file) => file.type === "application/pdf" || file.type.startsWith("image/")
+      );
+      if (files.length > 0) {
+        setSelectedFiles(files);
+        onFilesSelect(files);
+      }
     }
   };
 
@@ -74,7 +81,8 @@ const Dropzone: React.FC<DropzoneProps> = ({ onFileSelect }) => {
         type="file" 
         ref={fileInputRef} 
         onChange={handleFileChange} 
-        accept="application/pdf" 
+        accept="application/pdf,image/png,image/jpeg,image/jpg" 
+        multiple
         style={{ display: 'none' }} 
       />
       
@@ -89,19 +97,21 @@ const Dropzone: React.FC<DropzoneProps> = ({ onFileSelect }) => {
         color: 'var(--accent-primary)',
         boxShadow: '0 0 20px rgba(59, 130, 246, 0.2)'
       }}>
-        {selectedFile ? <CheckCircle2 size={40} /> : <UploadCloud size={40} />}
+        {selectedFiles.length > 0 ? <CheckCircle2 size={40} /> : <UploadCloud size={40} />}
       </div>
       
       <div>
         <h3 style={{ fontSize: '1.5rem', fontWeight: 600, marginBottom: '8px' }}>
-          {selectedFile ? selectedFile.name : 'Click or Drop PDF to Edit'}
+          {selectedFiles.length > 0 
+            ? (selectedFiles.length === 1 ? selectedFiles[0].name : `${selectedFiles.length} files selected`) 
+            : 'Click or Drop PDF/Image to Edit'}
         </h3>
         <p style={{ color: 'var(--text-secondary)' }}>
-          {selectedFile ? 'File ready for editing' : 'Maximum file size: 50MB'}
+          {selectedFiles.length > 0 ? 'Files ready for editing' : 'Maximum file size: 50MB. Supports PDF, JPG, PNG'}
         </p>
       </div>
 
-      {!selectedFile && (
+      {selectedFiles.length === 0 && (
         <button style={{
           padding: '12px 32px',
           background: 'var(--accent-primary)',
