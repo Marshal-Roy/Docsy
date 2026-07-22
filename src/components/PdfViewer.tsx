@@ -6,6 +6,8 @@ import { RotateCw, Trash2, Download, MousePointer2, Highlighter, PenLine, Messag
 import ThumbnailSidebar from './ThumbnailSidebar';
 import AnnotationOverlay from './AnnotationOverlay';
 import TextLayerOverlay from './TextLayerOverlay';
+import SortPagesModal from './SortPagesModal';
+import { ListOrdered } from 'lucide-react';
 
 // Configure the worker
 pdfjsLib.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@${pdfjsLib.version}/build/pdf.worker.min.mjs`;
@@ -27,6 +29,7 @@ const PdfViewer: React.FC = () => {
   const [isExporting, setIsExporting] = useState(false);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [showScannedModal, setShowScannedModal] = useState(false);
+  const [showSortModal, setShowSortModal] = useState(false);
   const [highlightOcr, setHighlightOcr] = useState(false);
 
   const toolButtons: { id: any; icon: any; label: string }[] = [
@@ -655,6 +658,14 @@ const PdfViewer: React.FC = () => {
           </div>
             <button 
               className="glass-interactive" 
+              title="Sort Pages"
+              onClick={() => setShowSortModal(true)}
+              style={{ width: 'auto', padding: '0 12px', height: '36px', display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: '8px', color: 'var(--accent-primary)', fontWeight: 500, fontSize: '0.9rem' }}
+            >
+              Sort Pages
+            </button>
+            <button 
+              className="glass-interactive" 
               title="Rotate Page"
               onClick={() => rotatePage(currentPageIndex, 90)}
               style={{ width: '36px', height: '36px', display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: '8px', color: 'var(--accent-primary)' }}
@@ -856,6 +867,7 @@ const PdfViewer: React.FC = () => {
           </div>
         )}
 
+        <SortPagesModal isOpen={showSortModal} onClose={() => setShowSortModal(false)} />
       </div>
     </div>
   );

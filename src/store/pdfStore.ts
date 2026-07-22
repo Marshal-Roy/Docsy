@@ -77,6 +77,7 @@ interface PdfState {
   reorderPages: (activeId: string, overId: string) => void;
   hydrate: () => Promise<boolean>;
   exportPdf: () => Promise<Uint8Array>;
+  sortPagesByValue: (keyName: string, order: 'asc' | 'desc') => Promise<void>;
   pendingDelete: { type: 'page' | 'annotation', pageIndex: number, annotationId?: string, message?: string } | null;
   setPendingDelete: (pending: { type: 'page' | 'annotation', pageIndex: number, annotationId?: string, message?: string } | null) => void;
 }
@@ -870,6 +871,129 @@ export const usePdfStore = create<PdfState>((set, get) => ({
 
       const savedBytes = await newPdfDoc.save();
       return savedBytes;
+    } finally {
+      set({ isProcessing: false });
+    }
+  },
+
+  sortPagesByValue: async (keyName: string, order: 'asc' | 'desc') => {
+    const { pages, pdfDoc, pdfBytes, pdfProxy, currentPageIndex, fileName } = get();
+    if (!pdfDoc || !pdfProxy) return;
+
+    set({ isProcessing: true });
+    try {
+      const pageValues = await Promise.all(pages.map(async (pageInfo, index) => {
+        let combinedText = '';
+        
+        // 1. Text from annotations (OCR)
+        const textAnns = pageInfo.annotations.filter(a => a.type === 'text' && a.data);
+        const annText = textAnns.map(a => a.data).join(' ');
+        combinedText += annText + ' ';
+
+        // 2. Text from PDF native
+        try {
+          const page = await pdfProxy.getPage(pageInfo.originalIndex + 1);
+          const textContent = await page.getTextContent();
+          const nativeText = textContent.items.map((item: any) => item.str).join(' ');
+          combinedText += nativeText;
+        } catch (e) {
+          console.warn('Could not extract native text for page', index, e);
+        }
+
+        // 3. Search for keyName
+        const lowerKey = keyName.toLowerCase();
+        const lowerCombined = combinedText.toLowerCase();
+        const keyIndex = lowerCombined.indexOf(lowerKey);
+        
+        let parsedValue: number | string | null = null;
+        let isNull = true;
+
+        if (keyIndex !== -1) {
+          // Extract the rest of the string after the key
+          const substring = combinedText.substring(keyIndex + keyName.length).trim();
+          
+          // Let's refine rawValue to grab the immediate next "token" or "phrase". 
+          const tokens = substring.split(/\s{2,}|\n/).map(s => s.trim()).filter(s => s);
+          let rawValue = tokens.length > 0 ? tokens[0] : substring.trim();
+
+          // Fallback if token is empty
+          if (!rawValue) {
+             rawValue = substring.substring(0, 100).trim();
+          }
+
+          if (rawValue) {
+            isNull = false;
+            
+            // Try parsing as Date
+            const parsedDate = Date.parse(rawValue);
+            // Ensure it's a valid date and not just a small integer
+            const isPureNumber = /^\$?-?[\d,]+(\.\d+)?$/.test(rawValue);
+            
+            if (!isNaN(parsedDate) && !isPureNumber && rawValue.length > 4) {
+              parsedValue = parsedDate;
+            } else {
+              // Try parsing as number
+              const cleanNumberStr = rawValue.replace(/[^0-9.-]+/g, '');
+              const parsedFloat = parseFloat(cleanNumberStr);
+              if (!isNaN(parsedFloat) && cleanNumberStr.length > 0) {
+                parsedValue = parsedFloat;
+              } else {
+                // Fallback to string
+                parsedValue = rawValue.toLowerCase();
+              }
+            }
+          }
+        }
+
+        return { pageInfo, parsedValue, isNull };
+      }));
+
+      // 4. Sort
+      pageValues.sort((a, b) => {
+        if (a.isNull && b.isNull) return 0;
+        if (a.isNull) return 1; // nulls always at the end
+        if (b.isNull) return -1;
+
+        if (typeof a.parsedValue === 'number' && typeof b.parsedValue === 'number') {
+          return order === 'asc' ? a.parsedValue - b.parsedValue : b.parsedValue - a.parsedValue;
+        }
+
+        // String comparison
+        const strA = String(a.parsedValue);
+        const strB = String(b.parsedValue);
+        
+        return order === 'asc' ? strA.localeCompare(strB) : strB.localeCompare(strA);
+      });
+
+      const newPages = pageValues.map(pv => pv.pageInfo);
+
+      // 5. Physical reorder: Recreate the document with the new order
+      const newPdfDoc = await PDFDocument.create();
+      const indices = newPages.map(p => p.originalIndex);
+      const copiedPages = await newPdfDoc.copyPages(pdfDoc, indices);
+      copiedPages.forEach(page => newPdfDoc.addPage(page));
+
+      const syncedPages = newPages.map((p, i) => ({
+        ...p,
+        originalIndex: i
+      }));
+
+      const newBytes = await newPdfDoc.save();
+
+      set({ 
+        pages: syncedPages, 
+        pdfDoc: newPdfDoc,
+        pdfBytes: newBytes,
+        pdfProxy: null,
+        currentPageIndex: 0 // Reset to first page after sort
+      });
+
+      await saveDocument({
+        bytes: newBytes,
+        state: { pages: syncedPages, currentPageIndex: 0, fileName }
+      });
+    } catch (error) {
+      console.error('Error sorting pages:', error);
     } finally {
       set({ isProcessing: false });
     }
