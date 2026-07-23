@@ -59,6 +59,8 @@ export const metadata: Metadata = {
   },
 };
 
+import Header from "@/components/Header";
+
 export default function RootLayout({
   children,
 }: {
@@ -73,16 +75,7 @@ export default function RootLayout({
       </head>
       <body>
         <div className="app-container">
-          <header className="header glass">
-            <div className="logo" style={{ fontWeight: 700, fontSize: '1.2rem', display: 'flex', alignItems: 'center' }}>
-              <span><span style={{ color: 'var(--accent-primary)' }}>Doc</span>sy</span>
-            </div>
-            <nav style={{ display: 'flex', gap: '20px', fontSize: '0.9rem', color: 'var(--text-secondary)' }}>
-              <span>Home</span>
-              <span>Tools</span>
-              <span>About</span>
-            </nav>
-          </header>
+          <Header />
           <main className="main-content">
             {children}
           </main>
