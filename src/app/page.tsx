@@ -3,6 +3,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { FileUp, Edit3, Layers, FileSearch, Zap, ArrowLeft, Minimize2, RefreshCw, FileDown, Check, FileText, Loader2, ArrowRight } from 'lucide-react';
 import dynamic from 'next/dynamic';
 import Dropzone from '@/components/Dropzone';
+import FaqSection from '@/components/FaqSection';
 
 import { usePdfStore } from '@/store/pdfStore';
 
@@ -33,6 +34,10 @@ export default function Home() {
   // Handle hydration on mount
   useEffect(() => {
     const init = async () => {
+      if (typeof window !== 'undefined' && window.location.hash.startsWith('#faq')) {
+        setView('landing');
+        return;
+      }
       const hasData = await hydrate();
       if (hasData) {
         setView('editor');
@@ -44,7 +49,7 @@ export default function Home() {
     init();
   }, [hydrate]);
 
-  // Handle browser back button
+  // Handle browser back button and hash changes
   useEffect(() => {
     const handlePopState = (e: PopStateEvent) => {
       if (e.state?.view) {
@@ -53,8 +58,17 @@ export default function Home() {
         setView('landing');
       }
     };
+    const handleHashChange = () => {
+      if (window.location.hash.startsWith('#faq')) {
+        setView('landing');
+      }
+    };
     window.addEventListener('popstate', handlePopState);
-    return () => window.removeEventListener('popstate', handlePopState);
+    window.addEventListener('hashchange', handleHashChange);
+    return () => {
+      window.removeEventListener('popstate', handlePopState);
+      window.removeEventListener('hashchange', handleHashChange);
+    };
   }, []);
 
   const handleFilesSelect = async (selectedFiles: File[]) => {
@@ -681,6 +695,8 @@ export default function Home() {
           ))}
         </div>
       </section>
+
+      <FaqSection />
 
       <footer style={{ marginTop: 'auto', paddingTop: '40px', color: 'var(--text-secondary)', fontSize: '0.8rem' }}>
         © 2026 Docsy. Your privacy is our priority. No files are stored on our servers.

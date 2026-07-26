@@ -41,16 +41,54 @@ const SortPagesModal: React.FC<SortPagesModalProps> = ({ isOpen, onClose }) => {
         boxShadow: '0 20px 40px rgba(0,0,0,0.2)'
       }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
-          <h3 style={{ margin: 0, fontSize: '1.2rem', color: '#111' }}>Sort Pages by Value</h3>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+            <h3 style={{ margin: 0, fontSize: '1.2rem', color: '#111' }}>Sort Pages by Value</h3>
+            <a
+              href="/#faq-sort"
+              onClick={(e) => {
+                e.preventDefault();
+                onClose();
+                window.location.href = '/#faq-sort';
+              }}
+              style={{
+                color: 'var(--accent-primary)',
+                fontSize: '0.8rem',
+                textDecoration: 'none',
+                background: 'rgba(59, 130, 246, 0.1)',
+                padding: '4px 10px',
+                borderRadius: '12px',
+                fontWeight: 600,
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '4px',
+                cursor: 'pointer'
+              }}
+            >
+              Know more
+            </a>
+          </div>
           <button onClick={onClose} style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: '#666' }}>
             <X size={20} />
           </button>
         </div>
 
         <div style={{ marginBottom: '16px' }}>
-          <label style={{ display: 'block', marginBottom: '8px', fontSize: '0.9rem', color: '#444', fontWeight: 500 }}>
-            Value Name (e.g. "Date:", "Salary:")
-          </label>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+            <label style={{ fontSize: '0.9rem', color: '#444', fontWeight: 500 }}>
+              Value Name (e.g. "Date:", "Salary:")
+            </label>
+            <a
+              href="/#faq-sort"
+              onClick={(e) => {
+                e.preventDefault();
+                onClose();
+                window.location.href = '/#faq-sort';
+              }}
+              style={{ color: 'var(--accent-primary)', fontSize: '0.8rem', textDecoration: 'underline', cursor: 'pointer', fontWeight: 500 }}
+            >
+              Know more
+            </a>
+          </div>
           <input
             type="text"
             value={keyName}
