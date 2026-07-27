@@ -1,7 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { compress, Resolution } from 'compress-pdf';
 import path from 'path';
 import fsSync from 'fs';
+import fs from 'fs/promises';
+import os from 'os';
+import crypto from 'crypto';
+import { execFile as execFileCallback } from 'child_process';
+import { promisify } from 'util';
+
+const execFile = promisify(execFileCallback);
 
 /**
  * Resolves the absolute path to the bundled Ghostscript executable.
@@ -36,6 +42,82 @@ function getGhostscriptBinPath(): string | undefined {
   return undefined;
 }
 
+async function compressWithGhostscript(
+  inputBuffer: Buffer,
+  level: string,
+  gsBinary: string
+): Promise<Buffer> {
+  const tempDir = os.tmpdir();
+  const id = crypto.randomUUID();
+  const inputPath = path.join(tempDir, `gs-in-${id}.pdf`);
+  const outputPath = path.join(tempDir, `gs-out-${id}.pdf`);
+
+  await fs.writeFile(inputPath, inputBuffer);
+
+  try {
+    const presetMap: Record<string, { setting: string; dpi: number; qFactor: number }> = {
+      low: { setting: '/printer', dpi: 200, qFactor: 0.7 },
+      medium: { setting: '/ebook', dpi: 120, qFactor: 0.4 },
+      high: { setting: '/screen', dpi: 72, qFactor: 0.25 },
+    };
+
+    const config = presetMap[level] || presetMap.medium;
+
+    const args = [
+      '-q',
+      '-dNOPAUSE',
+      '-dBATCH',
+      '-dSAFER',
+      '-dSimulateOverprint=true',
+      '-sDEVICE=pdfwrite',
+      '-dCompatibilityLevel=1.4',
+      `-dPDFSETTINGS=${config.setting}`,
+      '-dEmbedAllFonts=true',
+      '-dSubsetFonts=true',
+      '-dAutoRotatePages=/None',
+      
+      // Force aggressive downsampling at 1.0 threshold for ALL image types
+      '-dDownsampleColorImages=true',
+      '-dColorImageDownsampleType=/Bicubic',
+      `-dColorImageResolution=${config.dpi}`,
+      '-dColorImageDownsampleThreshold=1.0',
+      
+      '-dDownsampleGrayImages=true',
+      '-dGrayImageDownsampleType=/Bicubic',
+      `-dGrayImageResolution=${config.dpi}`,
+      '-dGrayImageDownsampleThreshold=1.0',
+      
+      '-dDownsampleMonoImages=true',
+      '-dMonoImageDownsampleType=/Bicubic',
+      `-dMonoImageResolution=${config.dpi}`,
+      '-dMonoImageDownsampleThreshold=1.0',
+      
+      // Prevent AutoFilter override and force lossy DCT (JPEG) encoding
+      '-dAutoFilterColorImages=false',
+      '-dAutoFilterGrayImages=false',
+      '-dColorImageFilter=/DCTEncode',
+      '-dGrayImageFilter=/DCTEncode',
+      
+      `-sOutputFile=${outputPath}`,
+      '-c',
+      `<< /ColorImageDict << /QFactor ${config.qFactor} /Blend 1 >> /GrayImageDict << /QFactor ${config.qFactor} /Blend 1 >> >> setdistillerparams`,
+      '-f',
+      inputPath,
+    ];
+
+    console.log(`[Server] Executing Ghostscript (${gsBinary}) with level=${level}, dpi=${config.dpi}, qFactor=${config.qFactor}...`);
+
+    // Pass windowsHide: true to prevent Windows terminal popup flash
+    await execFile(gsBinary, args, { windowsHide: true });
+
+    const compressedBuffer = await fs.readFile(outputPath);
+    return compressedBuffer;
+  } finally {
+    await fs.unlink(inputPath).catch(() => {});
+    await fs.unlink(outputPath).catch(() => {});
+  }
+}
+
 export async function POST(req: NextRequest) {
   try {
     const formData = await req.formData();
@@ -49,32 +131,13 @@ export async function POST(req: NextRequest) {
     const arrayBuffer = await file.arrayBuffer();
     const inputBuffer = Buffer.from(arrayBuffer);
 
-    const resolutionMap: Record<string, Resolution> = {
-      low: 'printer',    // 300 DPI, high quality, light compression
-      medium: 'ebook',   // 150 DPI, balanced quality and size
-      high: 'screen',    // 72 DPI, maximum file size reduction
-    };
+    // Resolve bundled Ghostscript executable from project root
+    const binPath = getGhostscriptBinPath() || (process.platform === 'win32' ? 'gswin64c' : 'gs');
+    console.log(`[Server] Using Ghostscript binary at: ${binPath}`);
 
-    const resolution = resolutionMap[level] || 'ebook';
+    console.log(`[Server] Compressing PDF (${inputBuffer.length} B) with level=${level}...`);
 
-    // Resolve and set the exact binary path so compress-pdf doesn't fail with ENOENT
-    const binPath = getGhostscriptBinPath();
-    if (binPath) {
-      process.env.COMPRESS_PDF_BIN_PATH = binPath;
-      console.log(`[Server] Found Ghostscript binary at: ${binPath}`);
-    } else {
-      console.warn('[Server] Could not locate bundled Ghostscript binary, relying on system PATH...');
-    }
-
-    console.log(`[Server] Compressing PDF (${inputBuffer.length} B) with resolution=${resolution}...`);
-
-    const result = await compress(inputBuffer, {
-      resolution,
-      compatibilityLevel: 1.4,
-      ...(binPath ? { gsModule: binPath } : {}),
-    });
-
-    const compressedBuffer: Buffer = Buffer.isBuffer(result) ? result : ((result as any).buffer as Buffer) || Buffer.from(result as any);
+    const compressedBuffer = await compressWithGhostscript(inputBuffer, level, binPath);
 
     console.log(`[Server] Compression finished: ${compressedBuffer.length} B (saved ${((1 - compressedBuffer.length / inputBuffer.length) * 100).toFixed(1)}%)`);
 
