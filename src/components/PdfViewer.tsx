@@ -238,12 +238,18 @@ const PdfViewer: React.FC = () => {
     }
   };
 
-  const getNormalizedPoint = (e: React.MouseEvent) => {
+  const getNormalizedPoint = (e: React.MouseEvent | React.TouchEvent) => {
     if (!containerRef.current) return { x: 0, y: 0 };
     const rect = containerRef.current.getBoundingClientRect();
     
-    let clientX = e.clientX - rect.left;
-    let clientY = e.clientY - rect.top;
+    let clientX, clientY;
+    if ('touches' in e) {
+      clientX = e.touches[0].clientX - rect.left;
+      clientY = e.touches[0].clientY - rect.top;
+    } else {
+      clientX = (e as React.MouseEvent).clientX - rect.left;
+      clientY = (e as React.MouseEvent).clientY - rect.top;
+    }
     
     if (viewport) {
       const displayWidth = rect.width;
@@ -279,6 +285,17 @@ const PdfViewer: React.FC = () => {
   };
 
   const handleMouseMove = (e: React.MouseEvent) => {
+    if (!isDrawing) return;
+    setCurrentPoints(prev => [...prev, getNormalizedPoint(e)]);
+  };
+
+  const handleTouchStart = (e: React.TouchEvent) => {
+    if (activeTool === 'select' || activeTool === 'text') return;
+    setIsDrawing(true);
+    setCurrentPoints([getNormalizedPoint(e)]);
+  };
+
+  const handleTouchMove = (e: React.TouchEvent) => {
     if (!isDrawing) return;
     setCurrentPoints(prev => [...prev, getNormalizedPoint(e)]);
   };
@@ -728,6 +745,10 @@ const PdfViewer: React.FC = () => {
           onMouseMove={handleMouseMove}
           onMouseUp={handleMouseUp}
           onMouseLeave={handleMouseUp}
+          onTouchStart={handleTouchStart}
+          onTouchMove={handleTouchMove}
+          onTouchEnd={handleMouseUp}
+          onTouchCancel={handleMouseUp}
           className="glass" 
           style={{
             padding: '0',
@@ -737,7 +758,8 @@ const PdfViewer: React.FC = () => {
             boxShadow: '0 0 50px rgba(0,0,0,0.3)',
             marginBottom: '40px',
             position: 'relative',
-            cursor: activeTool === 'select' ? 'default' : 'crosshair'
+            cursor: activeTool === 'select' ? 'default' : 'crosshair',
+            touchAction: (activeTool === 'pen' || activeTool === 'highlight' || activeTool === 'comment') ? 'none' : 'auto'
           }}
         >
           <canvas ref={canvasRef} style={{ maxWidth: '100%', height: 'auto', display: 'block' }} />
