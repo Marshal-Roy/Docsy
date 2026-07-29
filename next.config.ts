@@ -5,7 +5,7 @@ const nextConfig: NextConfig = {
   reactCompiler: true,
   serverExternalPackages: ['compress-pdf'],
   outputFileTracingIncludes: {
-    '/api/compress': ['./node_modules/compress-pdf/bin/**/*'],
+    '/api/compress': ['./bin/linux/ghostscript_linux/**/*'],
   },
 };
 
