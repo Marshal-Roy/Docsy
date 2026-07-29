@@ -19,6 +19,20 @@ async function ensureGhostscriptBinPath(): Promise<string> {
   const rootDir = process.cwd();
   const gsDir = path.join(rootDir, 'node_modules', 'compress-pdf', 'bin', 'gs');
 
+  if (process.platform === 'linux') {
+    // Point to the statically bundled Linux binary
+    const linuxGs = path.join(rootDir, 'bin', 'linux', 'ghostscript_linux', 'usr', 'local', 'bin', 'gs');
+    if (fsSync.existsSync(linuxGs)) {
+      // Vercel strips execute permissions on trace sometimes, ensure it's executable
+      try {
+        execSync(`chmod +x ${linuxGs}`);
+      } catch (e) {
+        // Ignore chmod errors on read-only filesystems if already executable
+      }
+      return linuxGs;
+    }
+  }
+
   const candidates: string[] = [];
   if (process.platform === 'win32') {
     candidates.push(
@@ -30,7 +44,6 @@ async function ensureGhostscriptBinPath(): Promise<string> {
     candidates.push(
       path.join(gsDir, 'bin', 'gs'),
       path.join(gsDir, 'gs'),
-      '/tmp/gs/bin/gs', // Runtime downloaded location
       '/usr/bin/gs',
       '/usr/local/bin/gs',
       '/opt/homebrew/bin/gs'
@@ -40,28 +53,6 @@ async function ensureGhostscriptBinPath(): Promise<string> {
   for (const candidate of candidates) {
     if (fsSync.existsSync(candidate)) {
       return candidate;
-    }
-  }
-
-  // If we are on Linux and GS is missing (e.g. Vercel), download it at runtime!
-  if (process.platform === 'linux') {
-    console.log('[Server] Ghostscript missing on Linux. Downloading to /tmp...');
-    const tmpGsDir = '/tmp/gs';
-    const tmpTarPath = '/tmp/ghostscript_linux.tar.xz';
-    const downloadUrl = 'https://github.com/victorsoares96/compress-pdf/releases/download/binaries/ghostscript_linux.tar.xz';
-    
-    try {
-      if (!fsSync.existsSync(tmpGsDir)) {
-        execSync(`mkdir -p ${tmpGsDir}`);
-        execSync(`curl -L -s ${downloadUrl} -o ${tmpTarPath}`);
-        execSync(`tar -xJf ${tmpTarPath} -C ${tmpGsDir}`);
-        execSync(`chmod +x ${tmpGsDir}/bin/gs`);
-        execSync(`rm ${tmpTarPath}`);
-        console.log('[Server] Ghostscript successfully downloaded and extracted to /tmp/gs/bin/gs');
-      }
-      return `${tmpGsDir}/bin/gs`;
-    } catch (e: any) {
-      console.error('[Server] Failed to download Ghostscript at runtime:', e.message);
     }
   }
 
