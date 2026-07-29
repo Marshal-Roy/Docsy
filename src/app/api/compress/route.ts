@@ -9,11 +9,13 @@ import { promisify } from 'util';
 
 const execFile = promisify(execFileCallback);
 
+import { execSync } from 'child_process';
+
 /**
- * Resolves the absolute path to the bundled Ghostscript executable.
- * Next.js server bundling changes __dirname, so get-bin-path fails to find the local binary unless explicitly specified.
+ * Resolves or downloads the absolute path to the Ghostscript executable.
+ * On Vercel (Linux), node_modules may be pruned. If gs is missing, we download it to /tmp.
  */
-function getGhostscriptBinPath(): string | undefined {
+async function ensureGhostscriptBinPath(): Promise<string> {
   const rootDir = process.cwd();
   const gsDir = path.join(rootDir, 'node_modules', 'compress-pdf', 'bin', 'gs');
 
@@ -28,6 +30,7 @@ function getGhostscriptBinPath(): string | undefined {
     candidates.push(
       path.join(gsDir, 'bin', 'gs'),
       path.join(gsDir, 'gs'),
+      '/tmp/gs/bin/gs', // Runtime downloaded location
       '/usr/bin/gs',
       '/usr/local/bin/gs',
       '/opt/homebrew/bin/gs'
@@ -39,7 +42,30 @@ function getGhostscriptBinPath(): string | undefined {
       return candidate;
     }
   }
-  return undefined;
+
+  // If we are on Linux and GS is missing (e.g. Vercel), download it at runtime!
+  if (process.platform === 'linux') {
+    console.log('[Server] Ghostscript missing on Linux. Downloading to /tmp...');
+    const tmpGsDir = '/tmp/gs';
+    const tmpTarPath = '/tmp/ghostscript_linux.tar.xz';
+    const downloadUrl = 'https://github.com/victorsoares96/compress-pdf/releases/download/binaries/ghostscript_linux.tar.xz';
+    
+    try {
+      if (!fsSync.existsSync(tmpGsDir)) {
+        execSync(`mkdir -p ${tmpGsDir}`);
+        execSync(`curl -L -s ${downloadUrl} -o ${tmpTarPath}`);
+        execSync(`tar -xJf ${tmpTarPath} -C ${tmpGsDir}`);
+        execSync(`chmod +x ${tmpGsDir}/bin/gs`);
+        execSync(`rm ${tmpTarPath}`);
+        console.log('[Server] Ghostscript successfully downloaded and extracted to /tmp/gs/bin/gs');
+      }
+      return `${tmpGsDir}/bin/gs`;
+    } catch (e: any) {
+      console.error('[Server] Failed to download Ghostscript at runtime:', e.message);
+    }
+  }
+
+  return process.platform === 'win32' ? 'gswin64c' : 'gs';
 }
 
 async function compressWithGhostscript(
@@ -131,8 +157,8 @@ export async function POST(req: NextRequest) {
     const arrayBuffer = await file.arrayBuffer();
     const inputBuffer = Buffer.from(arrayBuffer);
 
-    // Resolve bundled Ghostscript executable from project root
-    const binPath = getGhostscriptBinPath() || (process.platform === 'win32' ? 'gswin64c' : 'gs');
+    // Resolve or download bundled Ghostscript executable from project root
+    const binPath = await ensureGhostscriptBinPath();
     console.log(`[Server] Using Ghostscript binary at: ${binPath}`);
 
     console.log(`[Server] Compressing PDF (${inputBuffer.length} B) with level=${level}...`);
