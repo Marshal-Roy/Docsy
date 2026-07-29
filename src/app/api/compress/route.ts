@@ -20,8 +20,8 @@ async function ensureGhostscriptBinPath(): Promise<string> {
   const gsDir = path.join(rootDir, 'node_modules', 'compress-pdf', 'bin', 'gs');
 
   if (process.platform === 'linux') {
-    // Point to the statically bundled Linux binary
-    const linuxGs = path.join(rootDir, 'bin', 'linux', 'ghostscript_linux', 'usr', 'local', 'bin', 'gs');
+    // Point to the statically bundled Lambda-native Linux binary
+    const linuxGs = path.join(rootDir, 'bin', 'linux', 'gs');
     if (fsSync.existsSync(linuxGs)) {
       // Vercel strips execute permissions on trace sometimes, ensure it's executable
       try {
