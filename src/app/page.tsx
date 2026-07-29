@@ -227,7 +227,9 @@ export default function Home() {
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
-    URL.revokeObjectURL(url);
+    
+    // Delay revocation by 1 second to ensure mobile browsers (e.g., iOS Safari) have time to capture the download intent
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
   };
 
   const tools = [
