@@ -12,7 +12,11 @@ import { ListOrdered } from 'lucide-react';
 // Configure the worker
 pdfjsLib.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@${pdfjsLib.version}/build/pdf.worker.min.mjs`;
 
-const PdfViewer: React.FC = () => {
+interface PdfViewerProps {
+  onDownloadSuccess?: () => void;
+}
+
+export default function PdfViewer({ onDownloadSuccess }: PdfViewerProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const renderTaskRef = useRef<any>(null);
@@ -409,6 +413,7 @@ const PdfViewer: React.FC = () => {
       a.download = 'edited_docsy.pdf';
       a.click();
       URL.revokeObjectURL(url);
+      if (onDownloadSuccess) onDownloadSuccess();
     } finally {
       setIsExporting(false);
     }
@@ -893,6 +898,4 @@ const PdfViewer: React.FC = () => {
       </div>
     </div>
   );
-};
-
-export default PdfViewer;
+}
