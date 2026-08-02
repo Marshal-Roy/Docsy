@@ -195,7 +195,7 @@ export default function PdfViewer({ onDownloadSuccess }: PdfViewerProps) {
           
           // Tight white-out — expanded padding to avoid artifacts from ascenders/descenders
           const paddingBottom = screenFontSize * 0.25;
-          const paddingTop = screenFontSize * 0.2;
+          const paddingTop = 0;
           const paddingX = screenFontSize * 0.05;
           const rectH = (ann.height || 0) / 100 * naturalVp.height * vp.scale;
 
