@@ -666,7 +666,7 @@ const TextLayerOverlay: React.FC<Props> = ({ pdfProxy, pageIndex, viewport, canv
             Object.assign(span.style, {
               color:      activeColor,
               background: activeBgColor,
-              boxShadow:  `0 0 0 6px ${activeBgColor}`,
+              boxShadow:  `0 0 0 1px ${activeBgColor}`,
               outline:    'none',
               zIndex:     '300',
               borderRadius: '2px',
@@ -801,7 +801,7 @@ const TextLayerOverlay: React.FC<Props> = ({ pdfProxy, pageIndex, viewport, canv
                   const activeScreenFontSize = finalFontSize * viewport.scale;
                   // Increase padding to fully cover ascenders/descenders (overshoots)
                   const paddingBottom = activeScreenFontSize * 0.25;
-                  const paddingTop = activeScreenFontSize * 0.2;
+                  const paddingTop = 0;
                   const paddingX = activeScreenFontSize * 0.05;
                   // item.height is in PDF pts; convert to canvas (viewport) px
                   const rectH = item.height * viewport.scale;

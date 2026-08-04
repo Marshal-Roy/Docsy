@@ -12,7 +12,11 @@ import { ListOrdered } from 'lucide-react';
 // Configure the worker
 pdfjsLib.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@${pdfjsLib.version}/build/pdf.worker.min.mjs`;
 
-const PdfViewer: React.FC = () => {
+interface PdfViewerProps {
+  onDownloadSuccess?: () => void;
+}
+
+export default function PdfViewer({ onDownloadSuccess }: PdfViewerProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const renderTaskRef = useRef<any>(null);
@@ -31,6 +35,7 @@ const PdfViewer: React.FC = () => {
   const [showScannedModal, setShowScannedModal] = useState(false);
   const [showSortModal, setShowSortModal] = useState(false);
   const [highlightOcr, setHighlightOcr] = useState(false);
+  const [isCurrentPageScanned, setIsCurrentPageScanned] = useState(false);
 
   const toolButtons: { id: any; icon: any; label: string }[] = [
     { id: 'pen', icon: <PenLine size={18} />, label: 'Draw' },
@@ -59,7 +64,7 @@ const PdfViewer: React.FC = () => {
               try {
                 const firstPage = await pdf.getPage(1);
                 const textContent = await firstPage.getTextContent();
-                if (textContent.items.length === 0) {
+                if (textContent.items.length < 50) {
                   setIsScanned(true);
                   setShowScannedModal(true);
                 }
@@ -79,6 +84,19 @@ const PdfViewer: React.FC = () => {
 
   useEffect(() => {
     if (pdfProxy && pages.length > 0) {
+      const checkCurrentPage = async () => {
+        try {
+          const pageInfo = pages[currentPageIndex];
+          if (!pageInfo) return;
+          const page = await pdfProxy.getPage(pageInfo.originalIndex + 1);
+          const textContent = await page.getTextContent();
+          // Evaluate if the page is mostly scanned/image-based
+          setIsCurrentPageScanned(textContent.items.length < 50);
+        } catch (err) {
+          console.error('Error checking page text content', err);
+        }
+      };
+      checkCurrentPage();
       renderPage();
     }
     return () => {
@@ -191,7 +209,7 @@ const PdfViewer: React.FC = () => {
           
           // Tight white-out — expanded padding to avoid artifacts from ascenders/descenders
           const paddingBottom = screenFontSize * 0.25;
-          const paddingTop = screenFontSize * 0.2;
+          const paddingTop = 0;
           const paddingX = screenFontSize * 0.05;
           const rectH = (ann.height || 0) / 100 * naturalVp.height * vp.scale;
 
@@ -409,6 +427,7 @@ const PdfViewer: React.FC = () => {
       a.download = 'edited_docsy.pdf';
       a.click();
       URL.revokeObjectURL(url);
+      if (onDownloadSuccess) onDownloadSuccess();
     } finally {
       setIsExporting(false);
     }
@@ -520,7 +539,7 @@ const PdfViewer: React.FC = () => {
                 </button>
               ))}
               
-              {isScanned && (
+              {isCurrentPageScanned && (
                 <>
                   <div style={{ width: '1px', height: '24px', background: 'var(--border-glass)', margin: '0 4px' }} />
                   <div style={{ position: 'relative' }}>
@@ -893,6 +912,4 @@ const PdfViewer: React.FC = () => {
       </div>
     </div>
   );
-};
-
-export default PdfViewer;
+}

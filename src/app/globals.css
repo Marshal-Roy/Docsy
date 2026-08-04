@@ -224,3 +224,71 @@ body {
   -ms-overflow-style: none;
   scrollbar-width: none;
 }
+
+/* Mode Switcher Tabs */
+.mode-switcher {
+  display: flex;
+  padding: 6px;
+  border-radius: 30px;
+  gap: 4px;
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid var(--border-glass);
+  box-shadow: var(--shadow-premium);
+  z-index: 10;
+  transition: all 0.3s ease;
+}
+
+.mode-switcher-btn {
+  padding: 10px 28px;
+  border-radius: 24px;
+  border: none;
+  font-weight: 600;
+  cursor: pointer;
+  font-size: 0.95rem;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  background: transparent;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+
+.mode-switcher-btn:hover {
+  color: var(--text-primary);
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.mode-switcher-btn.active {
+  background: var(--accent-primary) !important;
+  color: white !important;
+  box-shadow: 0 4px 12px rgba(59, 130, 246, 0.3);
+}
+
+.mode-switcher-btn.feedback {
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: var(--text-primary);
+}
+
+.mode-switcher-btn.feedback:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+@media (max-width: 640px) {
+  .mode-switcher {
+    flex-direction: column;
+    border-radius: 16px;
+    width: 100%;
+    max-width: 340px;
+    gap: 6px;
+    padding: 8px;
+  }
+  
+  .mode-switcher-btn {
+    padding: 12px 20px;
+    border-radius: 10px;
+    width: 100%;
+    text-align: center;
+  }
+}

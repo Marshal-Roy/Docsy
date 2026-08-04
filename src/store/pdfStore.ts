@@ -727,6 +727,8 @@ export const usePdfStore = create<PdfState>((set, get) => ({
           }
 
           if (ann.type === 'text' && ann.points[0] && ann.data) {
+            if (!ann.isCommitted) continue; // Do not render uncommitted OCR text
+            
             const p = ann.points[0];
             const annX = (p.x / 100) * width;
             const annH = (ann.height || 0) * height / 100;
@@ -781,15 +783,17 @@ export const usePdfStore = create<PdfState>((set, get) => ({
 
             // Tight white-out rectangle — slightly increased padding to prevent original text ghosting/overlap (which makes text look bolder)
             const paddingBottom = fontSize * 0.25; 
-            const paddingTop = fontSize * 0.2; 
+            const paddingTop = 0; // Removed extra top padding to prevent cutting off lines above
             const paddingX = fontSize * 0.1;
+            
+            const { r: bgR, g: bgG, b: bgB } = parseColorToRgb(ann.bgColor || '#ffffff');
 
             page.drawRectangle({
               x:      annX - paddingX,
               y:      baselineY - paddingBottom, // bottom of rect
               width:  annW + paddingX * 2,
               height: annH + paddingTop + paddingBottom, // fully cover text ascenders/descenders
-              color:  { type: 'RGB' as any, red: 1, green: 1, blue: 1 } as any,
+              color:  { type: 'RGB' as any, red: bgR, green: bgG, blue: bgB } as any,
             });
 
             // Render segments if available, otherwise fall back to single text

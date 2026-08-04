@@ -1,9 +1,11 @@
 "use client";
 import React, { useState, useEffect, useRef } from 'react';
-import { FileUp, Edit3, Layers, FileSearch, Zap, ArrowLeft, Minimize2, RefreshCw, FileDown, Check, FileText, Loader2, ArrowRight } from 'lucide-react';
+import { FileUp, Edit3, Layers, FileSearch, Zap, ArrowLeft, Minimize2, RefreshCw, FileDown, Check, FileText, Loader2, ArrowRight, MessageSquare } from 'lucide-react';
 import dynamic from 'next/dynamic';
 import Dropzone from '@/components/Dropzone';
 import FaqSection from '@/components/FaqSection';
+import DownloadSuccessModal from '@/components/DownloadSuccessModal';
+import FeedbackModal from '@/components/FeedbackModal';
 
 import { usePdfStore } from '@/store/pdfStore';
 
@@ -28,6 +30,9 @@ export default function Home() {
     compressedSize: number;
     fileName: string;
   } | null>(null);
+
+  const [showSuccessModal, setShowSuccessModal] = useState(false);
+  const [showFeedbackModal, setShowFeedbackModal] = useState(false);
 
   const fileInputCompressRef = useRef<HTMLInputElement>(null);
 
@@ -230,6 +235,8 @@ export default function Home() {
     
     // Delay revocation by 1 second to ensure mobile browsers (e.g., iOS Safari) have time to capture the download intent
     setTimeout(() => URL.revokeObjectURL(url), 1000);
+    
+    setShowSuccessModal(true);
   };
 
   const tools = [
@@ -272,8 +279,18 @@ export default function Home() {
           </div>
         </div>
         <div style={{ flex: 1, overflow: 'hidden', minHeight: 0, display: 'flex', background: '#1e1e1e' }}>
-          <PdfViewer />
+          <PdfViewer onDownloadSuccess={() => setShowSuccessModal(true)} />
         </div>
+        
+        <DownloadSuccessModal 
+          isOpen={showSuccessModal} 
+          onClose={() => setShowSuccessModal(false)}
+          onOpenFeedback={() => setShowFeedbackModal(true)}
+        />
+        <FeedbackModal
+          isOpen={showFeedbackModal}
+          onClose={() => setShowFeedbackModal(false)}
+        />
       </div>
     );
   }
@@ -292,49 +309,25 @@ export default function Home() {
       </section>
 
       {/* Mode Switcher Tabs */}
-      <div className="glass" style={{
-        display: 'flex',
-        padding: '6px',
-        borderRadius: '30px',
-        gap: '4px',
-        background: 'rgba(255, 255, 255, 0.02)',
-        border: '1px solid var(--border-glass)',
-        boxShadow: 'var(--shadow-premium)',
-        zIndex: 10
-      }}>
+      <div className="mode-switcher">
         <button
           onClick={() => { setMode('edit'); setCompressFile(null); setCompressedResult(null); }}
-          style={{
-            padding: '10px 28px',
-            borderRadius: '24px',
-            border: 'none',
-            background: mode === 'edit' ? 'var(--accent-primary)' : 'transparent',
-            color: mode === 'edit' ? 'white' : 'var(--text-secondary)',
-            fontWeight: 600,
-            cursor: 'pointer',
-            fontSize: '0.95rem',
-            transition: 'all 0.2s cubic-bezier(0.4, 0, 0.2, 1)',
-            boxShadow: mode === 'edit' ? '0 4px 12px rgba(59, 130, 246, 0.3)' : 'none'
-          }}
+          className={`mode-switcher-btn ${mode === 'edit' ? 'active' : ''}`}
         >
           Edit PDF
         </button>
         <button
           onClick={() => setMode('compress')}
-          style={{
-            padding: '10px 28px',
-            borderRadius: '24px',
-            border: 'none',
-            background: mode === 'compress' ? 'var(--accent-primary)' : 'transparent',
-            color: mode === 'compress' ? 'white' : 'var(--text-secondary)',
-            fontWeight: 600,
-            cursor: 'pointer',
-            fontSize: '0.95rem',
-            transition: 'all 0.2s cubic-bezier(0.4, 0, 0.2, 1)',
-            boxShadow: mode === 'compress' ? '0 4px 12px rgba(59, 130, 246, 0.3)' : 'none'
-          }}
+          className={`mode-switcher-btn ${mode === 'compress' ? 'active' : ''}`}
         >
           Compress PDF
+        </button>
+        <button
+          onClick={() => setShowFeedbackModal(true)}
+          className="mode-switcher-btn feedback"
+        >
+          <MessageSquare size={16} />
+          Feedback
         </button>
       </div>
 
@@ -703,6 +696,16 @@ export default function Home() {
       <footer style={{ marginTop: 'auto', paddingTop: '40px', color: 'var(--text-secondary)', fontSize: '0.8rem' }}>
         © 2026 Docsy. Your privacy is our priority. No files are stored on our servers.
       </footer>
+
+      <DownloadSuccessModal 
+        isOpen={showSuccessModal} 
+        onClose={() => setShowSuccessModal(false)}
+        onOpenFeedback={() => setShowFeedbackModal(true)}
+      />
+      <FeedbackModal
+        isOpen={showFeedbackModal}
+        onClose={() => setShowFeedbackModal(false)}
+      />
     </div>
   );
 }
