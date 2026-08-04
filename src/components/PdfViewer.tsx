@@ -35,6 +35,7 @@ export default function PdfViewer({ onDownloadSuccess }: PdfViewerProps) {
   const [showScannedModal, setShowScannedModal] = useState(false);
   const [showSortModal, setShowSortModal] = useState(false);
   const [highlightOcr, setHighlightOcr] = useState(false);
+  const [isCurrentPageScanned, setIsCurrentPageScanned] = useState(false);
 
   const toolButtons: { id: any; icon: any; label: string }[] = [
     { id: 'pen', icon: <PenLine size={18} />, label: 'Draw' },
@@ -63,7 +64,7 @@ export default function PdfViewer({ onDownloadSuccess }: PdfViewerProps) {
               try {
                 const firstPage = await pdf.getPage(1);
                 const textContent = await firstPage.getTextContent();
-                if (textContent.items.length === 0) {
+                if (textContent.items.length < 50) {
                   setIsScanned(true);
                   setShowScannedModal(true);
                 }
@@ -83,6 +84,19 @@ export default function PdfViewer({ onDownloadSuccess }: PdfViewerProps) {
 
   useEffect(() => {
     if (pdfProxy && pages.length > 0) {
+      const checkCurrentPage = async () => {
+        try {
+          const pageInfo = pages[currentPageIndex];
+          if (!pageInfo) return;
+          const page = await pdfProxy.getPage(pageInfo.originalIndex + 1);
+          const textContent = await page.getTextContent();
+          // Evaluate if the page is mostly scanned/image-based
+          setIsCurrentPageScanned(textContent.items.length < 50);
+        } catch (err) {
+          console.error('Error checking page text content', err);
+        }
+      };
+      checkCurrentPage();
       renderPage();
     }
     return () => {
@@ -525,7 +539,7 @@ export default function PdfViewer({ onDownloadSuccess }: PdfViewerProps) {
                 </button>
               ))}
               
-              {isScanned && (
+              {isCurrentPageScanned && (
                 <>
                   <div style={{ width: '1px', height: '24px', background: 'var(--border-glass)', margin: '0 4px' }} />
                   <div style={{ position: 'relative' }}>
