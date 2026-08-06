@@ -30,6 +30,7 @@ export interface Annotation {
   originalWidth?: number; // For text white-out
   segments?: TextSegment[]; // Per-word/selection formatting segments
   isCommitted?: boolean; // True if this annotation has been edited and canvas-painted by the user
+  isOcr?: boolean; // True if created via OCR engine
 }
 
 interface PageInfo {
@@ -598,6 +599,51 @@ export const usePdfStore = create<PdfState>((set, get) => ({
         // by viewport.scale to get screen px — so we store the raw pt value here.
         const fontSizePt = pdfHeight;
         
+        // Extract color from canvas
+        let hexColor = '#000000';
+        try {
+          const w = Math.max(1, Math.floor(x1 - x0));
+          const h = Math.max(1, Math.floor(y1 - y0));
+          const boxImgData = context.getImageData(Math.floor(x0), Math.floor(y0), w, h);
+          const data = boxImgData.data;
+          
+          // 1. Collect all non-background pixels (luminance < 220)
+          const darkPixels: { r: number, g: number, b: number, lum: number }[] = [];
+          for (let i = 0; i < data.length; i += 4) {
+            const lum = 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2];
+            if (lum < 220) {
+              darkPixels.push({ r: data[i], g: data[i + 1], b: data[i + 2], lum });
+            }
+          }
+          
+          if (darkPixels.length > 0) {
+            // 2. Sort by luminance to find the true ink color (ignoring anti-aliasing fuzz)
+            darkPixels.sort((p1, p2) => p1.lum - p2.lum);
+            
+            // 3. Take the 5th to 25th percentile of the dark pixels.
+            // This ignores the absolute darkest 0-5% as potential noise/artifacts,
+            // and ignores the >25% as grey anti-aliasing edges.
+            const startIdx = Math.floor(darkPixels.length * 0.05);
+            const endIdx = Math.max(startIdx + 1, Math.floor(darkPixels.length * 0.25));
+            
+            let r = 0, g = 0, b = 0;
+            const sampleCount = endIdx - startIdx;
+            
+            for (let i = startIdx; i < endIdx; i++) {
+              r += darkPixels[i].r;
+              g += darkPixels[i].g;
+              b += darkPixels[i].b;
+            }
+            
+            r = Math.round(r / sampleCount);
+            g = Math.round(g / sampleCount);
+            b = Math.round(b / sampleCount);
+            hexColor = '#' + [r, g, b].map(x => x.toString(16).padStart(2, '0')).join('');
+          }
+        } catch (e) {
+          console.warn('Could not extract color for OCR box:', e);
+        }
+        
         newAnns.push({
           id: crypto.randomUUID(),
           type: 'text',
@@ -605,11 +651,12 @@ export const usePdfStore = create<PdfState>((set, get) => ({
           width: percWidth,
           height: percHeight,
           originalWidth: percWidth,
-          color: '#000000',
+          color: hexColor,
           opacity: 1,
           data: line.text.trim(),
           fontSize: fontSizePt,
-          fontFamily: 'Arial, Helvetica, sans-serif'
+          fontFamily: 'Arial, Helvetica, sans-serif',
+          isOcr: true
         });
       });
 
@@ -733,11 +780,16 @@ export const usePdfStore = create<PdfState>((set, get) => ({
             const annX = (p.x / 100) * width;
             const annH = (ann.height || 0) * height / 100;
             const pdfTopY  = height - (p.y / 100) * height;
-            // natY was stored as pdfBaselineY + item.height, so baseline is pdfTopY - annH
-            const baselineY = pdfTopY - annH;
+            
+            const fontSize  = Math.max(ann.fontSize || 12, 4);
+            // Use the explicit isOcr flag to determine if the height represents a full bounding box or true ascent
+            const isOcr = !!ann.isOcr;
+            const ascent = isOcr ? annH * 0.8 : annH;
+            
+            // natY was stored as pdfTopY, so baseline is pdfTopY - ascent
+            const baselineY = pdfTopY - ascent;
             
             const annW = Math.max(ann.width || 0, ann.originalWidth || 0) * width / 100;
-            const fontSize  = Math.max(ann.fontSize || 12, 4);
 
             // Helper to resolve StandardFont from family/weight/style
             const resolveFont = (fam: string, bold: boolean, italic: boolean) => {
@@ -781,10 +833,10 @@ export const usePdfStore = create<PdfState>((set, get) => ({
               return { r, g, b };
             };
 
-            // Tight white-out rectangle — slightly increased padding to prevent original text ghosting/overlap (which makes text look bolder)
-            const paddingBottom = fontSize * 0.25; 
-            const paddingTop = 0; // Removed extra top padding to prevent cutting off lines above
-            const paddingX = fontSize * 0.1;
+            // Tight white-out rectangle — reduced padding to prevent wiping adjacent text
+            const paddingBottom = fontSize * 0.05; 
+            const paddingTop = fontSize * 0.05; 
+            const paddingX = fontSize * 0.05;
             
             const { r: bgR, g: bgG, b: bgB } = parseColorToRgb(ann.bgColor || '#ffffff');
 

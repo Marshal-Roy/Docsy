@@ -263,7 +263,7 @@ const FontToolbar = ({ activeEdit, updateActiveSpanStyle, fontFamilies, colors }
           style={{ background: 'transparent', border: 'none', color: 'var(--text-primary)', width: '20px', height: '20px', cursor: 'pointer', borderRadius: '4px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
         >-</button>
         <div style={{ width: '24px', textAlign: 'center', fontSize: '0.75rem', fontWeight: 500 }}>
-          {activeEdit.currentFontSize}
+          {Math.round(activeEdit.currentFontSize)}
         </div>
         <button
           onMouseDown={(e) => { e.preventDefault(); updateActiveSpanStyle((prev: any) => ({ currentFontSize: prev.currentFontSize + 1 })); }}
@@ -439,8 +439,11 @@ const TextLayerOverlay: React.FC<Props> = ({ pdfProxy, pageIndex, viewport, canv
           const pdfY_topdown = (percY / 100) * naturalVp.height;
           // In PDF coords (bottom-up): top of text block
           const pdfTopY_ann = naturalVp.height - pdfY_topdown;
-          // baseline = pdfTopY - height (since item.height is the ascent above baseline)
-          const pdfBaselineY_ann = pdfTopY_ann - pdfHeight_ann;
+          
+          const activeFontSize = ann.fontSize || pdfHeight_ann;
+          // baseline = pdfTopY - 0.8 * activeFontSize (pins the top of the text to prevent shifting if font size changes)
+          const pdfAscent = activeFontSize * 0.8;
+          const pdfBaselineY_ann = pdfTopY_ann - pdfAscent;
           const width = (ann.originalWidth || ann.width || 0) / 100 * naturalVp.width;
           
           let color = [0,0,0];
@@ -457,11 +460,12 @@ const TextLayerOverlay: React.FC<Props> = ({ pdfProxy, pageIndex, viewport, canv
           tc.items.push({
             str: ann.data || '',
             fontName: ann.fontFamily || 'Arial, Helvetica, sans-serif',
-            transform: [1, 0, 0, ann.fontSize || pdfHeight_ann, pdfX, pdfBaselineY_ann],
+            transform: [1, 0, 0, activeFontSize, pdfX, pdfBaselineY_ann],
             width: width,
-            height: pdfHeight_ann,
+            height: pdfAscent,
             color: color,
             _isOcrFaux: true, // Flag to skip canvas-measurement rescaling
+            _ocrOriginalHeight: pdfHeight_ann,
           });
         });
 
@@ -518,10 +522,9 @@ const TextLayerOverlay: React.FC<Props> = ({ pdfProxy, pageIndex, viewport, canv
              const metrics = tCtx.measureText(item.str);
              if (metrics.width > 0) {
                  const calculatedSize = (item.width / metrics.width) * 100;
-                 if (item._isOcrFaux) {
-                     // For OCR, trust the width-based calculation completely
-                     pdfFontSize = calculatedSize;
-                 } else if (calculatedSize > basePdfFontSize * 0.6 && calculatedSize < basePdfFontSize * 1.5) {
+                 // For OCR, never auto-stretch font size to width. Trust the bounding box height (basePdfFontSize) 
+                 // to prevent massive vertical shifting and text size inflation.
+                 if (!item._isOcrFaux && calculatedSize > basePdfFontSize * 0.6 && calculatedSize < basePdfFontSize * 1.5) {
                      pdfFontSize = calculatedSize;
                  }
              }
@@ -546,7 +549,7 @@ const TextLayerOverlay: React.FC<Props> = ({ pdfProxy, pageIndex, viewport, canv
           );
 
           const originalStr = item.str;
-          const displayStr = existingAnn?.data ?? originalStr;
+          const displayStr = existingAnn?.data ?? originalStr.trimEnd();
 
           // ── 3. Screen coordinates for the overlay span ──
           const [sx, sy] = viewport.convertToViewportPoint(pdfX, pdfBaselineY);
@@ -600,8 +603,8 @@ const TextLayerOverlay: React.FC<Props> = ({ pdfProxy, pageIndex, viewport, canv
             position:    'absolute',
             left:        `${displayLeft}px`,
             top:         `${displayTop}px`,
-            width:       'auto',
-            minWidth:    `${displayWidth}px`,
+            width:       'max-content',
+            minWidth:    '0px',
             height:      `${displayHeight}px`,
             fontSize:    `${displayFontSize}px`,
             lineHeight:  `${displayFontSize}px`,
@@ -670,6 +673,7 @@ const TextLayerOverlay: React.FC<Props> = ({ pdfProxy, pageIndex, viewport, canv
               outline:    'none',
               zIndex:     '300',
               borderRadius: '2px',
+              minWidth:   `${displayWidth}px`, // Expand to cover original text while editing
             });
 
             // Make inner styled spans visible with their actual colors
@@ -696,7 +700,7 @@ const TextLayerOverlay: React.FC<Props> = ({ pdfProxy, pageIndex, viewport, canv
               italic,
               ff,
               currentFontFamily: currentFont,
-              currentFontSize: Math.round(currentSize / viewport.scale),
+              currentFontSize: currentSize / viewport.scale,
               currentFontWeight: currentWeight,
               currentFontStyle: currentItalic,
               currentColor: activeColor,
@@ -714,16 +718,15 @@ const TextLayerOverlay: React.FC<Props> = ({ pdfProxy, pageIndex, viewport, canv
             span.dataset.isDirty = 'true';
           });
 
-          // ── blur: commit edit by painting on canvas + baking into PDF ─
-          span.addEventListener('blur', async () => {
-            // We give a small delay to see if the user clicked on a toolbar button,
-            // which will handle its own focus/blur or preventDefault.
-            setTimeout(async () => {
-              // If activeElement is still pointing to this span, we clear it.
-              if (document.activeElement === span) return; 
-              // Also check if focus moved to toolbar
-              const toolbar = document.getElementById('text-formatting-toolbar');
-              if (toolbar && toolbar.contains(document.activeElement)) return;
+          // ── commit logic: extracted to handle both natural blur and forced commits ─
+          const commitEdit = async (force = false) => {
+              if (span.contentEditable === 'false') return;
+
+              if (!force) {
+                if (document.activeElement === span) return; 
+                const toolbar = document.getElementById('text-formatting-toolbar');
+                if (toolbar && toolbar.contains(document.activeElement)) return;
+              }
 
               span.contentEditable = 'false';
               const newStr = (span.textContent ?? '').replace(/\n/g, '');
@@ -738,25 +741,26 @@ const TextLayerOverlay: React.FC<Props> = ({ pdfProxy, pageIndex, viewport, canv
               const finalColor = span.dataset.textColor || currentColor;
               const finalBgColor = span.dataset.bgColor || existingAnn?.bgColor || '#ffffff';
 
-              // ── Restore invisible state first (always) ──
-              Object.assign(span.style, {
-                color:      'transparent',
-                background: 'transparent',
-                boxShadow:  'none',
-                outline:    'none',
-                zIndex:     '2',
-              });
-              const innerSpans = span.querySelectorAll('span');
-              innerSpans.forEach(s => { s.style.color = 'transparent'; });
-
               // Exit early if nothing changed — avoids artifacts from spurious canvas paints
               if (span.dataset.isDirty !== 'true') {
+                // ── Restore invisible state first (always) ──
+                Object.assign(span.style, {
+                  color:      'transparent',
+                  background: 'transparent',
+                  boxShadow:  'none',
+                  outline:    'none',
+                  zIndex:     '2',
+                  minWidth:   '0px',
+                });
+                const innerSpans = span.querySelectorAll('span');
+                innerSpans.forEach(s => { s.style.color = 'transparent'; });
+                
                 const isAnotherSpanEarly = document.activeElement && document.activeElement.tagName === 'SPAN' && (document.activeElement as HTMLElement).isContentEditable;
                 if (!isAnotherSpanEarly) setActiveEdit(null);
                 return;
               }
 
-              // Extract per-word segments before hiding
+              // Extract per-word segments BEFORE hiding
               const segments = extractSegmentsFromSpan(span, {
                 ff: finalFontFamily,
                 fontSize: finalFontSize,
@@ -768,6 +772,18 @@ const TextLayerOverlay: React.FC<Props> = ({ pdfProxy, pageIndex, viewport, canv
                 s.color !== finalColor || s.fontWeight !== finalFontWeight ||
                 s.fontStyle !== finalFontStyle || s.fontFamily !== finalFontFamily
               ));
+
+              // ── Restore invisible state ──
+              Object.assign(span.style, {
+                color:      'transparent',
+                background: 'transparent',
+                boxShadow:  'none',
+                outline:    'none',
+                zIndex:     '2',
+                minWidth:   '0px', // Restore tight hit area
+              });
+              const innerSpans = span.querySelectorAll('span');
+              innerSpans.forEach(s => { s.style.color = 'transparent'; });
 
               const store = usePdfStore.getState();
               const freshAnn = store.pages[pageIndex]?.annotations.find(
@@ -800,17 +816,19 @@ const TextLayerOverlay: React.FC<Props> = ({ pdfProxy, pageIndex, viewport, canv
 
                   const activeScreenFontSize = finalFontSize * viewport.scale;
                   // Increase padding to fully cover ascenders/descenders (overshoots)
-                  const paddingBottom = activeScreenFontSize * 0.25;
-                  const paddingTop = 0;
+                  const paddingBottom = activeScreenFontSize * 0.05;
+                  const paddingTop = activeScreenFontSize * 0.05;
                   const paddingX = activeScreenFontSize * 0.05;
-                  // item.height is in PDF pts; convert to canvas (viewport) px
-                  const rectH = item.height * viewport.scale;
+                  
+                  // Use font size to calculate exact box, as item.height only represents ascent
+                  const ascent = activeScreenFontSize * 0.8;
+                  const boxHeight = activeScreenFontSize;
 
                   ctx.fillStyle = finalBgColor;
                   const paintW = finalNatW / 100 * naturalVp.width * viewport.scale;
-                  // Y-axis goes down in canvas. We start at -rectH (up from baseline) minus paddingTop,
-                  // and the total height is rectH + paddingTop + paddingBottom
-                  ctx.fillRect(-paddingX, -rectH - paddingTop, paintW + paddingX * 2, rectH + paddingTop + paddingBottom);
+                  // Y-axis goes down in canvas. We start at -ascent minus paddingTop,
+                  // and the total height is boxHeight + paddingTop + paddingBottom
+                  ctx.fillRect(-paddingX, -ascent - paddingTop, paintW + paddingX * 2, boxHeight + paddingTop + paddingBottom);
 
                   ctx.textBaseline = 'alphabetic';
 
@@ -866,7 +884,13 @@ const TextLayerOverlay: React.FC<Props> = ({ pdfProxy, pageIndex, viewport, canv
               if (!isAnotherSpan) {
                 setActiveEdit(null);
               }
-            }, 150);
+          };
+
+          span.addEventListener('blur', () => {
+            setTimeout(() => commitEdit(false), 150);
+          });
+          span.addEventListener('force-commit', () => {
+            commitEdit(true);
           });
 
           container.appendChild(span);
@@ -901,11 +925,11 @@ const TextLayerOverlay: React.FC<Props> = ({ pdfProxy, pageIndex, viewport, canv
           } else if (el) {
             segments.push({
               text,
-              color: el.style.color || defaults.color,
-              fontWeight: el.style.fontWeight || defaults.fontWeight,
-              fontStyle: el.style.fontStyle || defaults.fontStyle,
-              fontFamily: el.style.fontFamily || defaults.ff,
-              fontSize: el.style.fontSize ? parseFloat(el.style.fontSize) / (viewport.scale * scaleFactor) : defaults.fontSize,
+              color: el.dataset.segColor || el.style.color || defaults.color,
+              fontWeight: el.dataset.segWeight || el.style.fontWeight || defaults.fontWeight,
+              fontStyle: el.dataset.segStyle || el.style.fontStyle || defaults.fontStyle,
+              fontFamily: el.dataset.segFamily || el.style.fontFamily || defaults.ff,
+              fontSize: el.dataset.segSize ? parseFloat(el.dataset.segSize) : (el.style.fontSize ? parseFloat(el.style.fontSize) / (viewport.scale * scaleFactor) : defaults.fontSize),
             });
           }
         }
@@ -943,34 +967,49 @@ const TextLayerOverlay: React.FC<Props> = ({ pdfProxy, pageIndex, viewport, canv
         // Copy current formatting from the updates
         if ('currentColor' in updates) {
           wrapper.style.color = newEdit.currentColor;
+          wrapper.dataset.segColor = newEdit.currentColor;
         }
         if ('currentFontWeight' in updates) {
           wrapper.style.fontWeight = newEdit.currentFontWeight;
+          wrapper.dataset.segWeight = newEdit.currentFontWeight;
         }
         if ('currentFontStyle' in updates) {
           wrapper.style.fontStyle = newEdit.currentFontStyle;
+          wrapper.dataset.segStyle = newEdit.currentFontStyle;
         }
         if ('currentFontFamily' in updates) {
           wrapper.style.fontFamily = newEdit.currentFontFamily;
+          wrapper.dataset.segFamily = newEdit.currentFontFamily;
         }
         if ('currentFontSize' in updates) {
-          // Display px = pdfFontSize * viewport.scale * scaleFactor
           const sizeInPx = newEdit.currentFontSize * viewport.scale * scaleFactor;
           wrapper.style.fontSize = `${sizeInPx}px`;
+          wrapper.dataset.segSize = newEdit.currentFontSize.toString();
         }
 
         try {
           range.surroundContents(wrapper);
         } catch (e) {
-          // surroundContents fails if selection crosses element boundaries
-          // Fall back: extract contents, wrap, and re-insert
           const fragment = range.extractContents();
           wrapper.appendChild(fragment);
           range.insertNode(wrapper);
         }
 
-        // Clear selection after applying
+        // Clean up nested styles that would override the new wrapper
+        const innerSpans = wrapper.querySelectorAll('span');
+        innerSpans.forEach(s => {
+          if ('currentColor' in updates) { s.style.color = ''; delete s.dataset.segColor; }
+          if ('currentFontWeight' in updates) { s.style.fontWeight = ''; delete s.dataset.segWeight; }
+          if ('currentFontStyle' in updates) { s.style.fontStyle = ''; delete s.dataset.segStyle; }
+          if ('currentFontFamily' in updates) { s.style.fontFamily = ''; delete s.dataset.segFamily; }
+          if ('currentFontSize' in updates) { s.style.fontSize = ''; delete s.dataset.segSize; }
+        });
+
+        // Re-select the wrapper so multiple formats can be chained
         sel.removeAllRanges();
+        const newRange = document.createRange();
+        newRange.selectNodeContents(wrapper);
+        sel.addRange(newRange);
       }
     } else {
       // No selection — apply to entire span (legacy behavior)
@@ -1039,6 +1078,14 @@ const TextLayerOverlay: React.FC<Props> = ({ pdfProxy, pageIndex, viewport, canv
           pointerEvents: 'auto',
           zIndex:        5,
           overflow:      'hidden',
+        }}
+        onMouseDown={(e) => {
+          if (e.target === containerRef.current) {
+            if (document.activeElement instanceof HTMLElement) {
+              document.activeElement.blur();
+            }
+            setActiveEdit(null);
+          }
         }}
       />
       {activeEdit && typeof document !== 'undefined' && ReactDOM.createPortal(
