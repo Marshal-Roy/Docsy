@@ -194,13 +194,21 @@ export default function PdfViewer({ onDownloadSuccess }: PdfViewerProps) {
           // ann.points[0].y is the % of the TOP of the text block from the top of natural page
           const pdfX       = (ann.points[0].x / 100) * naturalVp.width;
           const pdfTopYBot = naturalVp.height - (ann.points[0].y / 100) * naturalVp.height;
-          // Baseline in PDF space is Top - Height
-          const pdfBaselineY = pdfTopYBot - (ann.height || 0) / 100 * naturalVp.height;
+          const heightInPts = (ann.height || 0) / 100 * naturalVp.height;
+          // Font size in PDF pts
+          const pdfFontSize = ann.fontSize || heightInPts;
+          
+          // Use the explicit isOcr flag to determine if the height represents a full bounding box or true ascent
+          const isOcr = !!ann.isOcr;
+          const pdfAscent = isOcr ? heightInPts * 0.8 : heightInPts;
+          
+          // Baseline in PDF space is Top - Ascent
+          const pdfBaselineY = pdfTopYBot - pdfAscent;
 
           // Convert baseline point to screen coords
           const [sx, sy]   = vp.convertToViewportPoint(pdfX, pdfBaselineY);
           
-          const screenFontSize = (ann.fontSize || 12) * vp.scale;
+          const screenFontSize = pdfFontSize * vp.scale;
           const origW      = (Math.max(ann.width || 0, ann.originalWidth || 0)) / 100 * naturalVp.width * vp.scale;
 
           context.save();
@@ -208,14 +216,16 @@ export default function PdfViewer({ onDownloadSuccess }: PdfViewerProps) {
           context.rotate((vp.rotation * Math.PI) / 180);
           
           // Tight white-out — expanded padding to avoid artifacts from ascenders/descenders
-          const paddingBottom = screenFontSize * 0.25;
-          const paddingTop = 0;
+          const paddingBottom = screenFontSize * 0.05;
+          const paddingTop = screenFontSize * 0.05;
           const paddingX = screenFontSize * 0.05;
-          const rectH = (ann.height || 0) / 100 * naturalVp.height * vp.scale;
+          // Calculate ascent based on the font size rather than annotation height to cover true text boundaries
+          const ascent = screenFontSize * 0.8;
+          const boxHeight = screenFontSize;
 
           context.fillStyle = ann.bgColor || '#ffffff';
-          // Since origin is baseline (0,0), we go UP by (rectH + paddingTop) and DOWN by paddingBottom
-          context.fillRect(-paddingX, -rectH - paddingTop, origW + paddingX * 2, rectH + paddingTop + paddingBottom);
+          // Origin is baseline (0,0). We go UP by (ascent + paddingTop) and DOWN by (boxHeight - ascent + paddingBottom)
+          context.fillRect(-paddingX, -ascent - paddingTop, origW + paddingX * 2, boxHeight + paddingTop + paddingBottom);
 
           context.textBaseline = 'alphabetic'; // Align perfectly with PDF baseline
 
