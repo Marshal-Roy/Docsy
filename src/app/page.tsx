@@ -35,6 +35,7 @@ export default function Home() {
   const [showFeedbackModal, setShowFeedbackModal] = useState(false);
 
   const fileInputCompressRef = useRef<HTMLInputElement>(null);
+  const dropzoneRef = useRef<HTMLDivElement>(null);
 
   // Handle hydration on mount
   useEffect(() => {
@@ -311,13 +312,21 @@ export default function Home() {
       {/* Mode Switcher Tabs */}
       <div className="mode-switcher">
         <button
-          onClick={() => { setMode('edit'); setCompressFile(null); setCompressedResult(null); }}
+          onClick={() => { 
+            setMode('edit'); 
+            setCompressFile(null); 
+            setCompressedResult(null); 
+            setTimeout(() => dropzoneRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 50);
+          }}
           className={`mode-switcher-btn ${mode === 'edit' ? 'active' : ''}`}
         >
           Edit PDF
         </button>
         <button
-          onClick={() => setMode('compress')}
+          onClick={() => {
+            setMode('compress');
+            setTimeout(() => dropzoneRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 50);
+          }}
           className={`mode-switcher-btn ${mode === 'compress' ? 'active' : ''}`}
         >
           Compress PDF
@@ -331,10 +340,11 @@ export default function Home() {
         </button>
       </div>
 
-      {mode === 'edit' ? (
-        <Dropzone onFilesSelect={handleFilesSelect} />
-      ) : (
-        <div style={{ width: '100%', maxWidth: '700px', display: 'flex', flexDirection: 'column', gap: '20px' }}>
+      <div ref={dropzoneRef} style={{ width: '100%', display: 'flex', justifyContent: 'center', scrollMarginTop: '80px' }}>
+        {mode === 'edit' ? (
+          <Dropzone onFilesSelect={handleFilesSelect} />
+        ) : (
+          <div style={{ width: '100%', maxWidth: '700px', display: 'flex', flexDirection: 'column', gap: '20px' }}>
           {!compressFile ? (
             <div 
               className={`glass animate-fade-in ${isDragActiveCompress ? 'drag-active' : ''}`}
@@ -657,6 +667,7 @@ export default function Home() {
           )}
         </div>
       )}
+      </div>
 
       <section aria-labelledby="features-heading" style={{
         width: '100%',

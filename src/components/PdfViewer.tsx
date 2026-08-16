@@ -735,11 +735,13 @@ export default function PdfViewer({ onDownloadSuccess }: PdfViewerProps) {
                   setPendingDelete({ 
                     type: 'page', 
                     pageIndex: currentPageIndex,
-                    message: `Are you sure you want to delete Page ${currentPageIndex + 1}?`
+                    message: pages.length === 1
+                      ? "This is the only page in the document. Deleting it will leave a blank page. Are you sure you want to delete it?"
+                      : `Are you sure you want to delete Page ${currentPageIndex + 1}?`
                   });
                 }
               }}
-              disabled={!selectedAnnotationId && pages.length <= 1}
+              disabled={!selectedAnnotationId && pages.length === 0}
               style={{ width: '36px', height: '36px', display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: '8px', color: '#f87171' }}
             >
               <Trash2 size={18} />

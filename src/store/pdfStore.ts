@@ -441,17 +441,29 @@ export const usePdfStore = create<PdfState>((set, get) => ({
 
   deletePage: async (index: number) => {
     const { pages, currentPageIndex, pdfDoc, fileName } = get();
-    if (pages.length <= 1 || !pdfDoc) return;
+    if (!pdfDoc) return;
 
     set({ isProcessing: true });
     try {
       const newPages = pages.filter((_, i) => i !== index);
-      const newCurrentIndex = currentPageIndex >= newPages.length ? newPages.length - 1 : currentPageIndex;
+      const newCurrentIndex = currentPageIndex >= newPages.length ? Math.max(0, newPages.length - 1) : currentPageIndex;
 
       const finalPdfDoc = await PDFDocument.create();
-      const indices = newPages.map(p => p.originalIndex);
-      const copiedPages = await finalPdfDoc.copyPages(pdfDoc, indices);
-      copiedPages.forEach(page => finalPdfDoc.addPage(page));
+      
+      if (newPages.length === 0) {
+        // If it was the only page, replace with a blank one
+        finalPdfDoc.addPage([595.28, 841.89]);
+        newPages.push({
+          id: `page-${crypto.randomUUID()}`,
+          originalIndex: 0,
+          rotation: 0,
+          annotations: [],
+        });
+      } else {
+        const indices = newPages.map(p => p.originalIndex);
+        const copiedPages = await finalPdfDoc.copyPages(pdfDoc, indices);
+        copiedPages.forEach(page => finalPdfDoc.addPage(page));
+      }
 
       const syncedPages = newPages.map((p, i) => ({
         ...p,
