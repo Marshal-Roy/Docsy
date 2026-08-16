@@ -374,7 +374,7 @@ export default function Home() {
                 ref={fileInputCompressRef} 
                 onChange={handleFileChangeCompress} 
                 accept="application/pdf" 
-                style={{ display: 'none' }} 
+                style={{ position: 'absolute', width: '1px', height: '1px', padding: 0, margin: '-1px', overflow: 'hidden', clip: 'rect(0,0,0,0)', whiteSpace: 'nowrap', borderWidth: 0 }} 
               />
               
               <div style={{
@@ -400,7 +400,9 @@ export default function Home() {
                 </p>
               </div>
 
-              <button style={{
+              <button 
+                onClick={(e) => { e.stopPropagation(); fileInputCompressRef.current?.click(); }}
+                style={{
                 padding: '12px 32px',
                 background: 'var(--accent-primary)',
                 color: 'white',
