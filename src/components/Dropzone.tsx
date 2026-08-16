@@ -83,7 +83,7 @@ const Dropzone: React.FC<DropzoneProps> = ({ onFilesSelect }) => {
         onChange={handleFileChange} 
         accept="application/pdf,image/png,image/jpeg,image/jpg" 
         multiple
-        style={{ display: 'none' }} 
+        style={{ position: 'absolute', width: '1px', height: '1px', padding: 0, margin: '-1px', overflow: 'hidden', clip: 'rect(0,0,0,0)', whiteSpace: 'nowrap', borderWidth: 0 }} 
       />
       
       <div style={{
@@ -112,7 +112,9 @@ const Dropzone: React.FC<DropzoneProps> = ({ onFilesSelect }) => {
       </div>
 
       {selectedFiles.length === 0 && (
-        <button style={{
+        <button 
+          onClick={(e) => { e.stopPropagation(); fileInputRef.current?.click(); }}
+          style={{
           padding: '12px 32px',
           background: 'var(--accent-primary)',
           color: 'white',
