@@ -33,7 +33,25 @@ export interface Annotation {
   isOcr?: boolean; // True if created via OCR engine
 }
 
-interface PageInfo {
+export const OCR_LANGUAGES = [
+  { code: 'eng', name: 'English' },
+  { code: 'spa', name: 'Spanish' },
+  { code: 'fra', name: 'French' },
+  { code: 'deu', name: 'German' },
+  { code: 'ita', name: 'Italian' },
+  { code: 'por', name: 'Portuguese' },
+  { code: 'nld', name: 'Dutch' },
+  { code: 'pol', name: 'Polish' },
+  { code: 'rus', name: 'Russian' },
+  { code: 'hin', name: 'Hindi' },
+  { code: 'chi_sim', name: 'Chinese (Simplified)' },
+  { code: 'chi_tra', name: 'Chinese (Traditional)' },
+  { code: 'jpn', name: 'Japanese' },
+  { code: 'kor', name: 'Korean' },
+  { code: 'ara', name: 'Arabic' },
+];
+
+export interface PageInfo {
   id: string; // Unique ID for dnd-kit
   originalIndex: number;
   rotation: number;
@@ -55,10 +73,12 @@ interface PdfState {
   selectedAnnotationId: string | null;
   isScanned: boolean;
   isOcrRunning: boolean;
+  ocrLanguage: string;
   isFromImage: boolean;
 
   // Actions
   setIsScanned: (isScanned: boolean) => void;
+  setOcrLanguage: (lang: string) => void;
   runOcrOnPage: (pageIndex: number) => Promise<void>;
   setPdf: (bytes: Uint8Array, name: string, isFromImage?: boolean) => Promise<void>;
   setPdfProxy: (proxy: any) => void;
@@ -97,9 +117,11 @@ export const usePdfStore = create<PdfState>((set, get) => ({
   pendingDelete: null,
   isScanned: false,
   isOcrRunning: false,
+  ocrLanguage: 'eng',
   isFromImage: false,
 
   setIsScanned: (isScanned) => set({ isScanned }),
+  setOcrLanguage: (lang) => set({ ocrLanguage: lang }),
 
   setPendingDelete: (pending) => set({ pendingDelete: pending }),
 
@@ -538,7 +560,7 @@ export const usePdfStore = create<PdfState>((set, get) => ({
   },
 
   runOcrOnPage: async (pageIndex: number) => {
-    const { pdfProxy, pages, pdfBytes, fileName } = get();
+    const { pdfProxy, pages, ocrLanguage, pdfBytes, fileName } = get();
     if (!pdfProxy || !pages[pageIndex]) return;
 
     set({ isOcrRunning: true });
@@ -562,9 +584,9 @@ export const usePdfStore = create<PdfState>((set, get) => ({
         viewport: viewport
       }).promise;
 
-      // 2. Run Tesseract
+      // 2. Run Tesseract with selected language
       const Tesseract = await import('tesseract.js');
-      const worker = await Tesseract.createWorker('eng');
+      const worker = await Tesseract.createWorker(ocrLanguage || 'eng');
       const { data } = await worker.recognize(canvas, {}, { blocks: true });
       await worker.terminate();
 

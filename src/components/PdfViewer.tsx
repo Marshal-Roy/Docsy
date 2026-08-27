@@ -1,7 +1,7 @@
 "use client";
 import React, { useEffect, useRef, useState } from 'react';
 import * as pdfjsLib from 'pdfjs-dist';
-import { usePdfStore, Annotation } from '@/store/pdfStore';
+import { usePdfStore, Annotation, OCR_LANGUAGES } from '@/store/pdfStore';
 import { RotateCw, Trash2, Download, MousePointer2, Highlighter, PenLine, MessageSquare, ChevronLeft, ChevronRight, Loader2, Type, Image as ImageIcon, PlusSquare, FilePlus, ImagePlus, FileText, Menu, FileSearch } from 'lucide-react';
 import ThumbnailSidebar from './ThumbnailSidebar';
 import AnnotationOverlay from './AnnotationOverlay';
@@ -19,6 +19,7 @@ interface PdfViewerProps {
 export default function PdfViewer({ onDownloadSuccess }: PdfViewerProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const insertMenuRef = useRef<HTMLDivElement>(null);
   const renderTaskRef = useRef<any>(null);
   const [isDrawing, setIsDrawing] = useState(false);
   const [currentPoints, setCurrentPoints] = useState<{ x: number; y: number }[]>([]);
@@ -28,14 +29,34 @@ export default function PdfViewer({ onDownloadSuccess }: PdfViewerProps) {
     pdfBytes, pages, currentPageIndex, setCurrentPage, rotatePage, deletePage, exportPdf, 
     isProcessing, pdfProxy, setPdfProxy, activeTool, setTool, activeColor, setColor, addAnnotation,
     addBlankPage, addImagePage, addPages, selectedAnnotationId, setSelectedAnnotationId, deleteAnnotation,
-    pendingDelete, setPendingDelete, isScanned, isOcrRunning, setIsScanned, runOcrOnPage, isFromImage
+    pendingDelete, setPendingDelete, isScanned, isOcrRunning, ocrLanguage, setOcrLanguage, setIsScanned, runOcrOnPage, isFromImage
   } = usePdfStore();
   const [isExporting, setIsExporting] = useState(false);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [showScannedModal, setShowScannedModal] = useState(false);
   const [showSortModal, setShowSortModal] = useState(false);
+  const [showInsertMenu, setShowInsertMenu] = useState(false);
   const [highlightOcr, setHighlightOcr] = useState(false);
   const [isCurrentPageScanned, setIsCurrentPageScanned] = useState(false);
+
+  // Close insert menu when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent | TouchEvent) => {
+      if (insertMenuRef.current && !insertMenuRef.current.contains(event.target as Node)) {
+        setShowInsertMenu(false);
+      }
+    };
+
+    if (showInsertMenu) {
+      document.addEventListener('mousedown', handleClickOutside);
+      document.addEventListener('touchstart', handleClickOutside);
+    }
+
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+      document.removeEventListener('touchstart', handleClickOutside);
+    };
+  }, [showInsertMenu]);
 
   const toolButtons: { id: any; icon: any; label: string }[] = [
     { id: 'pen', icon: <PenLine size={18} />, label: 'Draw' },
@@ -365,7 +386,6 @@ export default function PdfViewer({ onDownloadSuccess }: PdfViewerProps) {
   const imageInputRef = useRef<HTMLInputElement>(null);
   const pdfInputRef = useRef<HTMLInputElement>(null);
   const imagePageInputRef = useRef<HTMLInputElement>(null);
-  const [showInsertMenu, setShowInsertMenu] = useState(false);
   const insertMode = useRef<number | undefined>(undefined);
 
   const handleImageSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -476,11 +496,11 @@ export default function PdfViewer({ onDownloadSuccess }: PdfViewerProps) {
           </div>
         )}
 
-        <div className="glass" style={{ 
-          padding: '12px 16px', 
+        <div className="glass shadow-premium" style={{ 
+          padding: '10px 12px', 
           borderRadius: '16px', 
           display: 'flex', 
-          gap: '16px', 
+          gap: '8px 12px', 
           alignItems: 'center', 
           justifyContent: 'center',
           flexWrap: 'wrap',
@@ -490,6 +510,7 @@ export default function PdfViewer({ onDownloadSuccess }: PdfViewerProps) {
           border: '1px solid var(--border-glass)',
           boxShadow: '0 10px 30px -10px rgba(0,0,0,0.3)',
           maxWidth: '850px',
+          width: 'calc(100% - 16px)',
           margin: '0 auto',
         }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
@@ -508,7 +529,7 @@ export default function PdfViewer({ onDownloadSuccess }: PdfViewerProps) {
             >
               <ChevronLeft size={18} />
             </button>
-            <span style={{ fontSize: '0.85rem', minWidth: '80px', textAlign: 'center', fontWeight: 500, color: 'white' }}>
+            <span style={{ fontSize: '0.85rem', minWidth: '70px', textAlign: 'center', fontWeight: 500, color: 'white' }}>
               Page {currentPageIndex + 1} / {pages.length}
             </span>
             <button 
@@ -523,8 +544,8 @@ export default function PdfViewer({ onDownloadSuccess }: PdfViewerProps) {
 
           <div className="hide-on-mobile" style={{ width: '1px', height: '24px', background: 'var(--border-glass)' }} />
 
-          <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap', justifyContent: 'center' }}>
-            <div style={{ display: 'flex', gap: '4px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px 12px', flexWrap: 'wrap', justifyContent: 'center' }}>
+            <div style={{ display: 'flex', gap: '4px', alignItems: 'center' }}>
               {toolButtons.map((tool) => (
                 <button
                   key={tool.id}
@@ -548,90 +569,119 @@ export default function PdfViewer({ onDownloadSuccess }: PdfViewerProps) {
                   {tool.icon}
                 </button>
               ))}
-              
-              {isCurrentPageScanned && (
-                <>
-                  <div style={{ width: '1px', height: '24px', background: 'var(--border-glass)', margin: '0 4px' }} />
-                  <div style={{ position: 'relative' }}>
-                    <button
-                      onClick={() => runOcrOnPage(currentPageIndex)}
-                      title="Make text editable (OCR)"
-                      style={{
-                        padding: '0 12px',
-                        height: '36px',
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: '6px',
-                        borderRadius: '8px',
-                        border: '1px solid var(--accent-primary)',
-                        background: highlightOcr ? 'rgba(59, 130, 246, 0.25)' : 'rgba(59, 130, 246, 0.1)',
-                        color: 'var(--accent-primary)',
-                        cursor: 'pointer',
-                        fontWeight: 600,
-                        fontSize: '0.85rem',
-                        transition: 'all 0.3s ease'
-                      }}
-                      className={`hover-glass ${highlightOcr ? 'animate-pulse-glow' : ''}`}
-                    >
-                      <FileSearch size={16} /> OCR Page
-                    </button>
-
-                    {highlightOcr && (
-                      <div style={{
-                        position: 'absolute',
-                        top: 'calc(100% + 14px)',
-                        left: '50%',
-                        transform: 'translateX(-50%)',
-                        zIndex: 100,
-                        pointerEvents: 'none',
-                      }}>
-                        <div className="animate-fade-in" style={{
-                          background: 'var(--accent-primary)',
-                          color: 'white',
-                          padding: '10px 16px',
-                          borderRadius: '8px',
-                          fontSize: '0.85rem',
-                          fontWeight: 500,
-                          whiteSpace: 'nowrap',
-                          boxShadow: 'var(--shadow-premium)',
-                          position: 'relative',
-                        }}>
-                          {/* Upward pointing arrow */}
-                          <div style={{
-                            position: 'absolute',
-                            top: '-6px',
-                            left: '50%',
-                            transform: 'translateX(-50%) rotate(45deg)',
-                            width: '12px',
-                            height: '12px',
-                            background: 'var(--accent-primary)',
-                            borderRadius: '2px 0 0 0',
-                          }} />
-                          <span style={{ position: 'relative', zIndex: 1 }}>Click here to enable text editing! ✨</span>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                </>
-              )}
-
-              <input 
-                type="file" 
-                ref={imageInputRef} 
-                style={{ display: 'none' }} 
-                accept="image/*" 
-                onChange={handleImageSelect} 
-              />
             </div>
 
-            <div style={{ display: 'flex', gap: '6px', padding: '0 8px' }}>
+            {isCurrentPageScanned && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: '6px', position: 'relative' }}>
+                <div className="hide-on-mobile" style={{ width: '1px', height: '24px', background: 'var(--border-glass)', margin: '0 2px' }} />
+                <select
+                  value={ocrLanguage}
+                  onChange={(e) => setOcrLanguage(e.target.value)}
+                  disabled={isOcrRunning}
+                  title="Select Document Language for OCR"
+                  style={{
+                    height: '36px',
+                    padding: '0 6px',
+                    maxWidth: '105px',
+                    borderRadius: '8px',
+                    border: '1px solid var(--border-glass)',
+                    background: 'rgba(255, 255, 255, 0.08)',
+                    color: 'var(--text-primary)',
+                    fontSize: '0.8rem',
+                    fontWeight: 500,
+                    cursor: isOcrRunning ? 'not-allowed' : 'pointer',
+                    outline: 'none',
+                    textOverflow: 'ellipsis',
+                  }}
+                  className="glass-interactive"
+                >
+                  {OCR_LANGUAGES.map((lang) => (
+                    <option key={lang.code} value={lang.code} style={{ background: '#1e1e1e', color: 'white' }}>
+                      {lang.name}
+                    </option>
+                  ))}
+                </select>
+
+                <button
+                  onClick={() => runOcrOnPage(currentPageIndex)}
+                  disabled={isOcrRunning}
+                  title="Make text editable (OCR)"
+                  style={{
+                    padding: '0 10px',
+                    height: '36px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '4px',
+                    borderRadius: '8px',
+                    border: '1px solid var(--accent-primary)',
+                    background: highlightOcr ? 'rgba(59, 130, 246, 0.25)' : 'rgba(59, 130, 246, 0.1)',
+                    color: 'var(--accent-primary)',
+                    cursor: isOcrRunning ? 'not-allowed' : 'pointer',
+                    fontWeight: 600,
+                    fontSize: '0.82rem',
+                    whiteSpace: 'nowrap',
+                    transition: 'all 0.3s ease',
+                    opacity: isOcrRunning ? 0.7 : 1,
+                  }}
+                  className={`hover-glass ${highlightOcr ? 'animate-pulse-glow' : ''}`}
+                >
+                  {isOcrRunning ? <Loader2 size={16} className="animate-spin" /> : <FileSearch size={16} />}
+                  {isOcrRunning ? 'OCR...' : 'OCR'}
+                </button>
+
+                {highlightOcr && (
+                  <div style={{
+                    position: 'absolute',
+                    top: 'calc(100% + 14px)',
+                    left: '50%',
+                    transform: 'translateX(-50%)',
+                    zIndex: 100,
+                    pointerEvents: 'none',
+                  }}>
+                    <div className="animate-fade-in" style={{
+                      background: 'var(--accent-primary)',
+                      color: 'white',
+                      padding: '10px 16px',
+                      borderRadius: '8px',
+                      fontSize: '0.85rem',
+                      fontWeight: 500,
+                      whiteSpace: 'nowrap',
+                      boxShadow: 'var(--shadow-premium)',
+                      position: 'relative',
+                    }}>
+                      <div style={{
+                        position: 'absolute',
+                        top: '-6px',
+                        left: '50%',
+                        transform: 'translateX(-50%) rotate(45deg)',
+                        width: '12px',
+                        height: '12px',
+                        background: 'var(--accent-primary)',
+                        borderRadius: '2px 0 0 0',
+                      }} />
+                      <span style={{ position: 'relative', zIndex: 1 }}>Click here to enable text editing! ✨</span>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
+            <input 
+              type="file" 
+              ref={imageInputRef} 
+              style={{ display: 'none' }} 
+              accept="image/*" 
+              onChange={handleImageSelect} 
+            />
+
+            <div style={{ display: 'flex', gap: '5px', padding: '0 2px', alignItems: 'center' }}>
               {colors.map((color) => (
                 <button
                   key={color}
                   onClick={() => setColor(color)}
                   style={{
-                    width: '20px',
-                    height: '20px',
+                    width: '18px',
+                    height: '18px',
                     borderRadius: '50%',
                     border: activeColor === color ? '2px solid white' : 'none',
                     background: color,
@@ -646,15 +696,15 @@ export default function PdfViewer({ onDownloadSuccess }: PdfViewerProps) {
 
           <div className="hide-on-mobile" style={{ width: '1px', height: '24px', background: 'var(--border-glass)' }} />
 
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap', justifyContent: 'center' }}>
-            <div style={{ position: 'relative' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap', justifyContent: 'center' }}>
+            <div ref={insertMenuRef} style={{ position: 'relative' }}>
             <button 
               className="glass-interactive" 
               title="Insert Page"
               onClick={() => setShowInsertMenu(!showInsertMenu)}
-              style={{ width: 'auto', padding: '0 12px', height: '36px', display: 'flex', gap: '8px', alignItems: 'center', justifyContent: 'center', borderRadius: '8px', color: 'var(--accent-primary)', fontWeight: 500, fontSize: '0.9rem' }}
+              style={{ width: 'auto', padding: '0 10px', height: '36px', display: 'flex', gap: '6px', alignItems: 'center', justifyContent: 'center', borderRadius: '8px', color: 'var(--accent-primary)', fontWeight: 500, fontSize: '0.85rem' }}
             >
-              <PlusSquare size={18} /> Insert Page
+              <PlusSquare size={16} /> Insert Page
             </button>
             
             {showInsertMenu && (
@@ -670,7 +720,7 @@ export default function PdfViewer({ onDownloadSuccess }: PdfViewerProps) {
                 gap: '4px',
                 boxShadow: '0 10px 25px -5px rgba(0,0,0,0.2)',
                 zIndex: 1000,
-                minWidth: '200px',
+                minWidth: '180px',
                 border: '1px solid var(--border-glass)'
               }}>
                 <div style={{ padding: '4px 8px', fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-secondary)' }}>Insert After</div>
@@ -706,7 +756,7 @@ export default function PdfViewer({ onDownloadSuccess }: PdfViewerProps) {
               className="glass-interactive" 
               title="Sort Pages"
               onClick={() => setShowSortModal(true)}
-              style={{ width: 'auto', padding: '0 12px', height: '36px', display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: '8px', color: 'var(--accent-primary)', fontWeight: 500, fontSize: '0.9rem' }}
+              style={{ width: 'auto', padding: '0 10px', height: '36px', display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: '8px', color: 'var(--accent-primary)', fontWeight: 500, fontSize: '0.85rem' }}
             >
               Sort Pages
             </button>
@@ -746,14 +796,14 @@ export default function PdfViewer({ onDownloadSuccess }: PdfViewerProps) {
             >
               <Trash2 size={18} />
             </button>
-          {/* No spacer needed */}
+          </div>
 
           <button 
             className="glass-interactive shadow-accent" 
             onClick={handleDownload}
             disabled={isProcessing}
             style={{ 
-              padding: '10px 24px', 
+              padding: '8px 20px', 
               borderRadius: '10px', 
               background: 'var(--accent-primary)', 
               color: 'white',
@@ -761,13 +811,13 @@ export default function PdfViewer({ onDownloadSuccess }: PdfViewerProps) {
               alignItems: 'center',
               gap: '8px',
               fontWeight: 600,
+              fontSize: '0.9rem',
               border: 'none'
             }}
           >
-            {isProcessing ? <Loader2 className="animate-spin" size={18} /> : <Download size={18} />}
+            {isProcessing ? <Loader2 className="animate-spin" size={16} /> : <Download size={16} />}
             Export PDF
           </button>
-          </div>
         </div>
         
         <div 
